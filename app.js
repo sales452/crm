@@ -29,6 +29,8 @@ let editingLeadId = null;    // lead currently open in the modal (null = creatin
 let leadsUnsub = null;
 let usersUnsub = null;
 let usersCache = [];
+let tasksUnsub = null;
+let tasks = [];
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -129,6 +131,7 @@ onAuthStateChanged(auth, async (user) => {
     currentUser = null; currentRole = null; currentName = null;
     if(leadsUnsub) leadsUnsub();
     if(usersUnsub) usersUnsub();
+    if(tasksUnsub) tasksUnsub();
     $("loginScreen").classList.remove("hidden");
     $("appScreen").classList.add("hidden");
     return;
@@ -155,6 +158,7 @@ onAuthStateChanged(auth, async (user) => {
 
   populateSalesPersonSelects();
   attachLeadsListener();
+  attachTasksListener();
   if(currentRole === "master") attachUsersListener();
   loadExchangeRates();
 });
@@ -168,7 +172,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     document.querySelectorAll(".tab-section").forEach(s => s.classList.add("hidden"));
     btn.classList.add("active");
     $("tab-" + btn.dataset.tab).classList.remove("hidden");
-    if(btn.dataset.tab === "tasks") renderDailyTasks();
+    if(btn.dataset.tab === "tasks"){ renderDailyTasks(); renderManualTasks(); }
     if(btn.dataset.tab === "dashboard") renderDashboard();
   };
 });
@@ -180,6 +184,7 @@ function populateSalesPersonSelects(){
   const opts = SALES_STAFF.map(n => `<option value="${n}">${n}</option>`).join("");
   $("f-salesPerson").innerHTML = opts;
   $("b-salesPerson").innerHTML = opts;
+  $("t-assignedTo").innerHTML = opts;
   $("filterSalesPerson").innerHTML = `<option value="">All Sales People</option>` + opts;
 
   if(currentRole === "sales"){
@@ -188,6 +193,7 @@ function populateSalesPersonSelects(){
     $("f-salesPerson").disabled = true;
     $("b-salesPerson").value = currentName;
     $("b-salesPerson").disabled = true;
+    $("t-assignedTo").value = currentName;
   }
 }
 
@@ -268,7 +274,8 @@ function refreshTasksTabBadge(){
   const reorderCount = visibleLeads().filter(l =>
     l.leadStatus === "Won" && l.reorderReminderDate && l.reorderReminderDate <= today
   ).length;
-  const count = followUpCount + reorderCount;
+  const manualCount = visibleTasks().filter(t => !t.done && t.dueDate && t.dueDate <= today).length;
+  const count = followUpCount + reorderCount + manualCount;
   const btn = document.querySelector('.tab-btn[data-tab="tasks"]');
   if(!btn) return;
   btn.textContent = count > 0 ? `Daily Tasks (${count})` : "Daily Tasks";
@@ -801,6 +808,101 @@ function renderDailyTasks(){
     btn.onclick = () => openLeadModal(btn.dataset.id);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Manual tasks -- standalone reminders not tied to any lead
+// ---------------------------------------------------------------------------
+function attachTasksListener(){
+  if(tasksUnsub) tasksUnsub();
+  // Same reasoning as the leads query: sales reps' security rule only lets
+  // them read tasks assigned to themselves, so the query itself needs that
+  // constraint or Firestore rejects the whole "list" outright.
+  const q = currentRole === "sales"
+    ? query(collection(db, "tasks"), where("assignedTo", "==", currentName), orderBy("dueDate", "asc"))
+    : query(collection(db, "tasks"), orderBy("dueDate", "asc"));
+  tasksUnsub = onSnapshot(q, snap => {
+    tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderManualTasks();
+    refreshTasksTabBadge();
+  }, err => {
+    console.error(err);
+    toast("Couldn't load tasks — check your connection.");
+  });
+}
+
+function visibleTasks(){
+  if(currentRole === "sales") return tasks.filter(t => t.assignedTo === currentName);
+  return tasks;
+}
+
+function renderManualTasks(){
+  const today = todayISO();
+  const open = visibleTasks().filter(t => !t.done).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
+  if(!open.length){
+    $("tasksManual").innerHTML = "<div class='hint-bar'>Nothing here — add one above.</div>";
+    return;
+  }
+  $("tasksManual").innerHTML = open.map(t => {
+    const overdue = t.dueDate && t.dueDate < today;
+    const dueLabel = t.dueDate === today ? "Today" : (overdue ? `Overdue since ${t.dueDate}` : t.dueDate);
+    return `
+      <div style="padding:0.7rem 0; border-bottom:1px solid var(--line);">
+        <div style="display:flex; justify-content:space-between; gap:0.6rem; flex-wrap:wrap;">
+          <strong>${escapeHtml(t.title||"")}</strong>
+          <span class="badge ${overdue ? "lost" : "new"}">${escapeHtml(dueLabel||"No date")}</span>
+        </div>
+        <div class="hint-bar" style="margin:0.2rem 0;">Assigned to ${escapeHtml(t.assignedTo||"")}${t.notes ? " · " + escapeHtml(t.notes) : ""}</div>
+        <button class="icon-btn" data-action="task-done" data-id="${t.id}">✓ Mark Done</button>
+        ${(currentRole === "master" || currentRole === "manager") ? `<button class="icon-btn" data-action="task-delete" data-id="${t.id}" style="margin-left:0.4rem;">Delete</button>` : ""}
+      </div>
+    `;
+  }).join("");
+
+  $("tasksManual").querySelectorAll('[data-action="task-done"]').forEach(btn => {
+    btn.onclick = async () => {
+      try{ await updateDoc(doc(db, "tasks", btn.dataset.id), { done: true, doneAt: serverTimestamp() }); }
+      catch(err){ console.error(err); toast("Couldn't update that task — try again."); }
+    };
+  });
+  $("tasksManual").querySelectorAll('[data-action="task-delete"]').forEach(btn => {
+    btn.onclick = async () => {
+      if(!confirm("Delete this task?")) return;
+      try{ await deleteDoc(doc(db, "tasks", btn.dataset.id)); }
+      catch(err){ console.error(err); toast("Couldn't delete that task — try again."); }
+    };
+  });
+}
+
+$("addTaskBtn").onclick = () => {
+  $("t-title").value = "";
+  $("t-dueDate").value = todayISO();
+  $("t-notes").value = "";
+  if(currentRole === "sales") $("t-assignedTo").value = currentName;
+  $("taskError").textContent = "";
+  $("taskOverlay").classList.remove("hidden");
+};
+$("taskCancelBtn").onclick = () => $("taskOverlay").classList.add("hidden");
+
+$("taskSaveBtn").onclick = async () => {
+  const title = $("t-title").value.trim();
+  if(!title){ $("taskError").textContent = "Enter what needs doing."; return; }
+  try{
+    await addDoc(collection(db, "tasks"), {
+      title,
+      dueDate: $("t-dueDate").value || todayISO(),
+      assignedTo: $("t-assignedTo").value,
+      notes: $("t-notes").value.trim(),
+      done: false,
+      createdBy: currentName,
+      createdAt: serverTimestamp()
+    });
+    toast("Task added.");
+    $("taskOverlay").classList.add("hidden");
+  }catch(err){
+    console.error(err);
+    $("taskError").textContent = "Couldn't save that task — try again.";
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Dashboard tab

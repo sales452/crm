@@ -283,6 +283,15 @@
     <!-- ===== DAILY TASKS TAB ===== -->
     <section id="tab-tasks" class="tab-section hidden">
       <div class="panel">
+        <div class="toolbar" style="margin-bottom:0.6rem;">
+          <h2 style="margin:0;">My Tasks</h2>
+          <div class="spacer"></div>
+          <button class="btn" id="addTaskBtn">+ Add Task</button>
+        </div>
+        <div class="hint-bar">General reminders that aren't tied to any lead — call a supplier, prep a quotation, chase an invoice, whatever needs doing.</div>
+        <div id="tasksManual"></div>
+      </div>
+      <div class="panel">
         <h2>Today's Follow-ups</h2>
         <div id="tasksToday"></div>
       </div>
@@ -448,6 +457,24 @@
       <button class="btn rust hidden" id="leadDeleteBtn">Delete</button>
       <button class="btn" id="leadSaveBtn">Save Lead</button>
     </div>
+  </div>
+</div>
+
+<!-- ============== ADD TASK MODAL ============== -->
+<div id="taskOverlay" class="overlay hidden">
+  <div class="modal">
+    <h2>New Task</h2>
+    <div class="field"><label>What needs doing</label><input type="text" id="t-title" placeholder="e.g. Call Bosch distributor about stock"></div>
+    <div class="grid2">
+      <div class="field"><label>Due Date</label><input type="date" id="t-dueDate"></div>
+      <div class="field"><label>Assigned To</label><select id="t-assignedTo"></select></div>
+    </div>
+    <div class="field"><label>Notes (optional)</label><textarea id="t-notes" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="taskCancelBtn">Cancel</button>
+      <button class="btn" id="taskSaveBtn">Save Task</button>
+    </div>
+    <div class="error-text" id="taskError"></div>
   </div>
 </div>
 

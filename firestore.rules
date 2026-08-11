@@ -1,0 +1,70 @@
+rules_version = '2';
+
+// ============================================================================
+// Deploy: Firebase Console > Firestore Database > Rules tab > paste this in
+// > Publish. (Or via CLI: firebase deploy --only firestore:rules)
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn(){
+      return request.auth != null;
+    }
+    function myUserDoc(){
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function myRole(){
+      return isSignedIn() ? myUserDoc().role : null;
+    }
+    function myName(){
+      return isSignedIn() ? myUserDoc().name : null;
+    }
+    function isMaster(){ return myRole() == "master"; }
+    function isManager(){ return myRole() == "manager"; }
+    function isMasterOrManager(){ return isMaster() || isManager(); }
+
+    // ---- users (team members & roles) ----
+    // Anyone signed in can read the team list (needed for the Sales Person
+    // dropdowns). Only master can create/update/delete team member records.
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isMaster();
+    }
+
+    // ---- leads ----
+    match /leads/{leadId} {
+      allow read: if isSignedIn() && (
+        isMasterOrManager() || resource.data.salesPerson == myName()
+      );
+      allow create: if isSignedIn() && (
+        isMasterOrManager() || request.resource.data.salesPerson == myName()
+      );
+      allow update: if isSignedIn() && (
+        isMasterOrManager() || resource.data.salesPerson == myName()
+      );
+      // Only the master can permanently delete a lead.
+      allow delete: if isMaster();
+    }
+
+    // ---- tasks (manual to-dos, not tied to a lead) ----
+    match /tasks/{taskId} {
+      allow read: if isSignedIn() && (
+        isMasterOrManager() || resource.data.assignedTo == myName()
+      );
+      allow create: if isSignedIn() && (
+        isMasterOrManager() || request.resource.data.assignedTo == myName()
+      );
+      allow update: if isSignedIn() && (
+        isMasterOrManager() || resource.data.assignedTo == myName()
+      );
+      allow delete: if isMasterOrManager();
+    }
+
+    // ---- settings (exchange rates etc.) ----
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isMasterOrManager();
+    }
+  }
+}
