@@ -908,6 +908,7 @@ function renderManualTasks(){
         ${t.done
           ? `<button class="icon-btn" data-action="task-reopen" data-id="${t.id}" title="Undo (F4)">↺ Reopen</button>`
           : `<button class="icon-btn" data-action="task-done" data-id="${t.id}" title="Mark Done (F2)">✓ Mark Done</button>`}
+        <button class="icon-btn" data-action="task-edit" data-id="${t.id}" style="margin-left:0.4rem;">Edit</button>
         ${(currentRole === "master" || currentRole === "manager") ? `<button class="icon-btn" data-action="task-delete" data-id="${t.id}" style="margin-left:0.4rem;">Delete</button>` : ""}
       </div>
     `;
@@ -925,6 +926,9 @@ function renderManualTasks(){
   $("tasksManual").querySelectorAll('[data-action="task-reopen"]').forEach(btn => {
     btn.onclick = () => reopenTask(btn.dataset.id);
   });
+  $("tasksManual").querySelectorAll('[data-action="task-edit"]').forEach(btn => {
+    btn.onclick = () => openTaskEditModal(btn.dataset.id);
+  });
   $("tasksManual").querySelectorAll('[data-action="task-delete"]').forEach(btn => {
     btn.onclick = async () => {
       if(!confirm("Delete this task?")) return;
@@ -934,7 +938,11 @@ function renderManualTasks(){
   });
 }
 
+let editingTaskId = null;
+
 $("addTaskBtn").onclick = () => {
+  editingTaskId = null;
+  $("taskModalTitle").textContent = "New Task";
   $("t-title").value = "";
   $("t-dueDate").value = todayISO();
   $("t-notes").value = "";
@@ -942,22 +950,41 @@ $("addTaskBtn").onclick = () => {
   $("taskError").textContent = "";
   $("taskOverlay").classList.remove("hidden");
 };
+
+function openTaskEditModal(taskId){
+  const task = tasks.find(t => t.id === taskId);
+  if(!task) return;
+  editingTaskId = taskId;
+  $("taskModalTitle").textContent = "Edit Task";
+  $("t-title").value = task.title || "";
+  $("t-dueDate").value = task.dueDate || todayISO();
+  $("t-assignedTo").value = task.assignedTo || "";
+  $("t-notes").value = task.notes || "";
+  $("taskError").textContent = "";
+  $("taskOverlay").classList.remove("hidden");
+}
+
 $("taskCancelBtn").onclick = () => $("taskOverlay").classList.add("hidden");
 
 $("taskSaveBtn").onclick = async () => {
   const title = $("t-title").value.trim();
   if(!title){ $("taskError").textContent = "Enter what needs doing."; return; }
+  const data = {
+    title,
+    dueDate: $("t-dueDate").value || todayISO(),
+    assignedTo: $("t-assignedTo").value,
+    notes: $("t-notes").value.trim()
+  };
   try{
-    await addDoc(collection(db, "tasks"), {
-      title,
-      dueDate: $("t-dueDate").value || todayISO(),
-      assignedTo: $("t-assignedTo").value,
-      notes: $("t-notes").value.trim(),
-      done: false,
-      createdBy: currentName,
-      createdAt: serverTimestamp()
-    });
-    toast("Task added.");
+    if(editingTaskId){
+      await updateDoc(doc(db, "tasks", editingTaskId), data);
+      toast("Task updated.");
+    }else{
+      await addDoc(collection(db, "tasks"), {
+        ...data, done: false, createdBy: currentName, createdAt: serverTimestamp()
+      });
+      toast("Task added.");
+    }
     $("taskOverlay").classList.add("hidden");
   }catch(err){
     console.error(err);
