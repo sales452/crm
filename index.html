@@ -24,6 +24,8 @@
     --gray-bg:#E4E2D8;
     --teal:#1D6B63;
     --teal-bg:#DCEBE9;
+    --blue:#2A5DB0;
+    --blue-bg:#DCE6F5;
   }
   *{box-sizing:border-box;}
   body{
@@ -157,6 +159,7 @@
   .badge.negotiation{ background:var(--mustard-bg); color:var(--mustard); }
   .badge.won{ background:var(--forest-bg); color:var(--forest); }
   .badge.lost{ background:var(--rust-bg); color:var(--rust); }
+  .badge.taskdone{ background:var(--blue-bg); color:var(--blue); }
 
   .icon-btn{
     padding:0.3rem 0.55rem; border:1px solid var(--line); border-radius:5px;
@@ -288,7 +291,7 @@
           <div class="spacer"></div>
           <button class="btn" id="addTaskBtn">+ Add Task</button>
         </div>
-        <div class="hint-bar">General reminders that aren't tied to any lead — call a supplier, prep a quotation, chase an invoice, whatever needs doing.</div>
+        <div class="hint-bar">General reminders that aren't tied to any lead — call a supplier, prep a quotation, chase an invoice, whatever needs doing. Hover a task, then <span class="kbd-hint">F2</span> marks it done · <span class="kbd-hint">F4</span> reopens it.</div>
         <div id="tasksManual"></div>
       </div>
       <div class="panel">

@@ -16,7 +16,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const SALES_STAFF = ["Silven", "Shivangi", "Saniya", "Yashvi"];
 const CURRENCIES = ["INR", "USD", "EUR", "RMB"];
 
 let currentUser = null;      // Firebase Auth user object
@@ -25,6 +24,7 @@ let currentName = null;      // display name from users/{uid}
 let leads = [];              // live leads array (role-filtered by security rules + query)
 let exchangeRates = { USD: 0, EUR: 0, RMB: 0 };
 let hoveredLeadId = null;    // tracks which lead row the mouse is over, for F2/F4
+let hoveredTaskId = null;    // tracks which manual task the mouse is over, for F2/F4
 let editingLeadId = null;    // lead currently open in the modal (null = creating new)
 let leadsUnsub = null;
 let usersUnsub = null;
@@ -159,7 +159,7 @@ onAuthStateChanged(auth, async (user) => {
   populateSalesPersonSelects();
   attachLeadsListener();
   attachTasksListener();
-  if(currentRole === "master") attachUsersListener();
+  attachUsersListener();
   loadExchangeRates();
 });
 
@@ -181,7 +181,10 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 // Sales-person selects (role-aware)
 // ---------------------------------------------------------------------------
 function populateSalesPersonSelects(){
-  const opts = SALES_STAFF.map(n => `<option value="${n}">${n}</option>`).join("");
+  // Built from the actual team list (Firestore `users`), not a hardcoded
+  // array -- anyone added via Users tab shows up here automatically.
+  const names = usersCache.map(u => u.name).filter(Boolean).sort();
+  const opts = names.map(n => `<option value="${n}">${n}</option>`).join("");
   $("f-salesPerson").innerHTML = opts;
   $("b-salesPerson").innerHTML = opts;
   $("t-assignedTo").innerHTML = opts;
@@ -427,22 +430,33 @@ async function reopenLead(leadId){
 }
 
 // ---------------------------------------------------------------------------
-// F2 / F4 shortcuts -- act on whichever lead row the mouse is hovering
+// F2 / F4 shortcuts -- act on whichever lead row OR task the mouse is
+// hovering. A lead row and a task can't both be hovered at once since
+// they live on different tabs, so whichever is set wins.
 // ---------------------------------------------------------------------------
 document.addEventListener("keydown", async (e) => {
   if(e.key !== "F2" && e.key !== "F4") return;
   const tag = (e.target.tagName || "").toLowerCase();
   if(tag === "input" || tag === "textarea" || tag === "select") return;
-  if(!hoveredLeadId) return;
-  const lead = leads.find(l => l.id === hoveredLeadId);
-  if(!lead) return;
-  e.preventDefault();
 
-  const tr = document.querySelector(`#leadsBody tr[data-id="${hoveredLeadId}"]`);
-  if(tr){ tr.classList.add("row-flash"); setTimeout(() => tr.classList.remove("row-flash"), 400); }
+  if(hoveredLeadId){
+    const lead = leads.find(l => l.id === hoveredLeadId);
+    if(!lead) return;
+    e.preventDefault();
+    const tr = document.querySelector(`#leadsBody tr[data-id="${hoveredLeadId}"]`);
+    if(tr){ tr.classList.add("row-flash"); setTimeout(() => tr.classList.remove("row-flash"), 400); }
+    if(e.key === "F2") markLeadWon(hoveredLeadId);
+    else markLeadLost(hoveredLeadId);
+    return;
+  }
 
-  if(e.key === "F2") markLeadWon(hoveredLeadId);
-  else markLeadLost(hoveredLeadId);
+  if(hoveredTaskId){
+    const task = tasks.find(t => t.id === hoveredTaskId);
+    if(!task) return;
+    e.preventDefault();
+    if(e.key === "F2") markTaskDone(hoveredTaskId);
+    else if(task.done) reopenTask(hoveredTaskId);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -835,34 +849,72 @@ function visibleTasks(){
   return tasks;
 }
 
+async function markTaskDone(taskId){
+  const task = tasks.find(t => t.id === taskId);
+  if(!task) return;
+  try{
+    await updateDoc(doc(db, "tasks", taskId), { done: true, doneAt: serverTimestamp() });
+    toast(`"${task.title}" marked done.`);
+  }catch(err){
+    console.error(err);
+    toast("Couldn't update that task — try again.");
+  }
+}
+
+async function reopenTask(taskId){
+  const task = tasks.find(t => t.id === taskId);
+  if(!task) return;
+  try{
+    await updateDoc(doc(db, "tasks", taskId), { done: false, doneAt: null });
+    toast(`"${task.title}" reopened.`);
+  }catch(err){
+    console.error(err);
+    toast("Couldn't reopen that task — try again.");
+  }
+}
+
 function renderManualTasks(){
   const today = todayISO();
-  const open = visibleTasks().filter(t => !t.done).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
-  if(!open.length){
+  const all = visibleTasks();
+  if(!all.length){
     $("tasksManual").innerHTML = "<div class='hint-bar'>Nothing here — add one above.</div>";
     return;
   }
-  $("tasksManual").innerHTML = open.map(t => {
-    const overdue = t.dueDate && t.dueDate < today;
-    const dueLabel = t.dueDate === today ? "Today" : (overdue ? `Overdue since ${t.dueDate}` : t.dueDate);
+  // Open tasks first (soonest due date first), completed ones after in
+  // blue so they stay visible as a record instead of just vanishing.
+  const open = all.filter(t => !t.done).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
+  const done = all.filter(t => t.done).sort((a,b) => (b.dueDate||"").localeCompare(a.dueDate||""));
+
+  const renderRow = (t) => {
+    const overdue = !t.done && t.dueDate && t.dueDate < today;
+    const dueLabel = t.done ? "Done" : (t.dueDate === today ? "Today" : (overdue ? `Overdue since ${t.dueDate}` : t.dueDate));
+    const badgeClass = t.done ? "taskdone" : (overdue ? "lost" : "new");
     return `
-      <div style="padding:0.7rem 0; border-bottom:1px solid var(--line);">
+      <div class="task-row" data-id="${t.id}" style="padding:0.7rem 0; border-bottom:1px solid var(--line); ${t.done ? "opacity:0.75;" : ""}">
         <div style="display:flex; justify-content:space-between; gap:0.6rem; flex-wrap:wrap;">
           <strong>${escapeHtml(t.title||"")}</strong>
-          <span class="badge ${overdue ? "lost" : "new"}">${escapeHtml(dueLabel||"No date")}</span>
+          <span class="badge ${badgeClass}">${escapeHtml(dueLabel||"No date")}</span>
         </div>
         <div class="hint-bar" style="margin:0.2rem 0;">Assigned to ${escapeHtml(t.assignedTo||"")}${t.notes ? " · " + escapeHtml(t.notes) : ""}</div>
-        <button class="icon-btn" data-action="task-done" data-id="${t.id}">✓ Mark Done</button>
+        ${t.done
+          ? `<button class="icon-btn" data-action="task-reopen" data-id="${t.id}" title="Undo (F4)">↺ Reopen</button>`
+          : `<button class="icon-btn" data-action="task-done" data-id="${t.id}" title="Mark Done (F2)">✓ Mark Done</button>`}
         ${(currentRole === "master" || currentRole === "manager") ? `<button class="icon-btn" data-action="task-delete" data-id="${t.id}" style="margin-left:0.4rem;">Delete</button>` : ""}
       </div>
     `;
-  }).join("");
+  };
 
+  $("tasksManual").innerHTML = open.map(renderRow).join("") + done.map(renderRow).join("");
+
+  document.querySelectorAll("#tasksManual .task-row").forEach(row => {
+    row.addEventListener("mouseenter", () => { hoveredTaskId = row.dataset.id; });
+    row.addEventListener("mouseleave", () => { if(hoveredTaskId === row.dataset.id) hoveredTaskId = null; });
+  });
   $("tasksManual").querySelectorAll('[data-action="task-done"]').forEach(btn => {
-    btn.onclick = async () => {
-      try{ await updateDoc(doc(db, "tasks", btn.dataset.id), { done: true, doneAt: serverTimestamp() }); }
-      catch(err){ console.error(err); toast("Couldn't update that task — try again."); }
-    };
+    btn.onclick = () => markTaskDone(btn.dataset.id);
+  });
+  $("tasksManual").querySelectorAll('[data-action="task-reopen"]').forEach(btn => {
+    btn.onclick = () => reopenTask(btn.dataset.id);
   });
   $("tasksManual").querySelectorAll('[data-action="task-delete"]').forEach(btn => {
     btn.onclick = async () => {
@@ -933,6 +985,15 @@ function attachUsersListener(){
   usersUnsub = onSnapshot(collection(db, "users"), snap => {
     const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     usersCache = users;
+    // Keep every Sales Person dropdown in sync with the real team list,
+    // for every role -- not just when master happens to have the Users
+    // tab open.
+    populateSalesPersonSelects();
+
+    // The team table itself (with Edit/Remove) is only rendered/usable by
+    // master anyway (the Users nav tab is hidden for everyone else), but
+    // guard it here too in case the DOM element ever becomes reachable.
+    if(currentRole !== "master") return;
     $("usersBody").innerHTML = users.map(u => `
       <tr>
         <td>${escapeHtml(u.name||"")}</td>
