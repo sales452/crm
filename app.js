@@ -2,7 +2,7 @@ import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc,
@@ -28,6 +28,7 @@ let hoveredLeadId = null;    // tracks which lead row the mouse is over, for F2/
 let editingLeadId = null;    // lead currently open in the modal (null = creating new)
 let leadsUnsub = null;
 let usersUnsub = null;
+let usersCache = [];
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -465,7 +466,11 @@ function openLeadModal(id){
     $(elId).value = lead ? (lead[field] ?? "") : (field === "inquiryDate" ? todayISO() : (field === "clientType" ? "Domestic" : (field === "leadStatus" ? "New" : (field === "orderStatus" ? "Pending" : (field === "leadConsumption" ? "Active" : (field === "quotedCurrency" || field === "orderCurrency" ? "INR" : ""))))));
   }
   if(currentRole === "sales") $("f-salesPerson").value = currentName;
+  $("transferHint").textContent = (currentRole === "master" || currentRole === "manager")
+    ? "Changing this and saving transfers the lead to that person — it's logged below."
+    : "";
 
+  renderTransferLog(lead);
   renderFollowUpLog(lead);
   $("f-followUpNote").value = "";
 
@@ -494,6 +499,15 @@ function renderReorderLog(lead){
   }
   $("reorderLogList").innerHTML = log.slice().reverse().map(entry =>
     `<div>• ${escapeHtml(entry.date||"")} (${escapeHtml(entry.by||"")}): ${escapeHtml(entry.note||"")}</div>`
+  ).join("");
+}
+
+function renderTransferLog(lead){
+  const log = (lead && lead.transferLog) || [];
+  $("transferHistorySection").style.display = log.length ? "" : "none";
+  if(!log.length) return;
+  $("transferLogList").innerHTML = log.slice().reverse().map(entry =>
+    `<div>• ${escapeHtml(entry.date||"")}: ${escapeHtml(entry.from||"—")} → ${escapeHtml(entry.to||"")} (by ${escapeHtml(entry.by||"")})</div>`
   ).join("");
 }
 
@@ -547,6 +561,13 @@ $("leadSaveBtn").onclick = async () => {
   if(data.leadStatus === "Won" && (!existingLead || !existingLead.reorderReminderDate)){
     data.reorderReminderDate = addDays(todayISO(), reorderCycleDays);
     data.reorderLog = existingLead ? (existingLead.reorderLog || []) : [];
+  }
+  // Sales Person changed on an existing lead -- that's a transfer. Log who
+  // moved it, from whom, to whom, and when, so there's a paper trail.
+  if(existingLead && data.salesPerson !== existingLead.salesPerson){
+    data.transferLog = (existingLead.transferLog || []).concat([{
+      date: todayISO(), from: existingLead.salesPerson || "—", to: data.salesPerson, by: currentName
+    }]);
   }
 
   try{
@@ -809,14 +830,21 @@ function attachUsersListener(){
   if(usersUnsub) usersUnsub();
   usersUnsub = onSnapshot(collection(db, "users"), snap => {
     const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    usersCache = users;
     $("usersBody").innerHTML = users.map(u => `
       <tr>
         <td>${escapeHtml(u.name||"")}</td>
         <td>${escapeHtml(u.email||"")}</td>
         <td><span class="role-badge ${u.role}">${escapeHtml(u.role||"")}</span></td>
-        <td>${u.id === currentUser.uid ? "—" : `<button class="icon-btn" data-action="remove-user" data-id="${u.id}">Remove Access</button>`}</td>
+        <td style="white-space:nowrap;">
+          <button class="icon-btn" data-action="edit-user" data-id="${u.id}">Edit</button>
+          ${u.id === currentUser.uid ? "" : `<button class="icon-btn" data-action="remove-user" data-id="${u.id}">Remove Access</button>`}
+        </td>
       </tr>
     `).join("");
+    $("usersBody").querySelectorAll('[data-action="edit-user"]').forEach(btn => {
+      btn.onclick = () => openUserEditModal(btn.dataset.id);
+    });
     $("usersBody").querySelectorAll('[data-action="remove-user"]').forEach(btn => {
       btn.onclick = async () => {
         if(!confirm("Remove this person's access to the CRM? (Their login will stop working; this doesn't delete their historical leads.)")) return;
@@ -831,6 +859,47 @@ function attachUsersListener(){
     });
   });
 }
+
+let editingUserId = null;
+
+function openUserEditModal(uid){
+  editingUserId = uid;
+  const userDoc = usersCache.find(u => u.id === uid);
+  if(!userDoc) return;
+  $("eu-name").value = userDoc.name || "";
+  $("eu-email").value = userDoc.email || "";
+  $("eu-role").value = userDoc.role || "sales";
+  $("userEditError").textContent = "";
+  $("userEditOverlay").classList.remove("hidden");
+}
+$("userEditCancelBtn").onclick = () => $("userEditOverlay").classList.add("hidden");
+
+$("userEditSaveBtn").onclick = async () => {
+  if(!editingUserId) return;
+  const name = $("eu-name").value.trim();
+  const role = $("eu-role").value;
+  if(!name){ $("userEditError").textContent = "Name can't be empty."; return; }
+  try{
+    await updateDoc(doc(db, "users", editingUserId), { name, role });
+    toast("Team member updated.");
+    $("userEditOverlay").classList.add("hidden");
+  }catch(err){
+    console.error(err);
+    $("userEditError").textContent = "Couldn't save — try again.";
+  }
+};
+
+$("sendResetEmailBtn").onclick = async () => {
+  const email = $("eu-email").value.trim();
+  if(!email) return;
+  try{
+    await sendPasswordResetEmail(auth, email);
+    toast(`Password reset email sent to ${email}.`);
+  }catch(err){
+    console.error(err);
+    $("userEditError").textContent = "Couldn't send that email — check the address is correct.";
+  }
+};
 
 // Creates a new team member's login WITHOUT signing the master out of their
 // own session -- done via a throwaway secondary Firebase app instance.
