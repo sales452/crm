@@ -314,6 +314,11 @@ function renderLeadsTable(){
   $("leadsBody").innerHTML = rows.map(l => {
     const quotedDisplay = l.quotedValue ? `${l.quotedCurrency||"INR"} ${Number(l.quotedValue).toLocaleString()}` : "—";
     const orderDisplay = l.orderValue ? `${l.orderCurrency||"INR"} ${Number(l.orderValue).toLocaleString()}` : "—";
+    const isClosed = l.leadStatus === "Won" || l.leadStatus === "Lost";
+    const statusButtons = isClosed
+      ? `<button class="icon-btn" data-action="reopen" data-id="${l.id}" title="Undo — back to active">↺ Reopen</button>`
+      : `<button class="icon-btn" data-action="mark-won" data-id="${l.id}" title="Won & Order Confirmed (F2)">✓ Won</button>
+         <button class="icon-btn" data-action="mark-lost" data-id="${l.id}" title="Lapsed (F4)">✕ Lost</button>`;
     return `
       <tr data-id="${l.id}">
         <td>${escapeHtml(l.inquiryDate||"")}</td>
@@ -326,7 +331,10 @@ function renderLeadsTable(){
         <td><span class="badge ${statusBadgeClass(l.leadStatus)}">${escapeHtml(l.leadStatus||"New")}</span></td>
         <td>${escapeHtml(l.followUpDate||"—")}</td>
         <td>${orderDisplay}</td>
-        <td><button class="icon-btn" data-action="edit" data-id="${l.id}">Open</button></td>
+        <td style="white-space:nowrap;">
+          <button class="icon-btn" data-action="edit" data-id="${l.id}">Open</button>
+          ${statusButtons}
+        </td>
       </tr>
     `;
   }).join("");
@@ -339,12 +347,76 @@ function renderLeadsTable(){
   $("leadsBody").querySelectorAll('[data-action="edit"]').forEach(btn => {
     btn.onclick = () => openLeadModal(btn.dataset.id);
   });
+  $("leadsBody").querySelectorAll('[data-action="mark-won"]').forEach(btn => {
+    btn.onclick = () => markLeadWon(btn.dataset.id);
+  });
+  $("leadsBody").querySelectorAll('[data-action="mark-lost"]').forEach(btn => {
+    btn.onclick = () => markLeadLost(btn.dataset.id);
+  });
+  $("leadsBody").querySelectorAll('[data-action="reopen"]').forEach(btn => {
+    btn.onclick = () => reopenLead(btn.dataset.id);
+  });
 }
 
 ["leadSearch","filterStatus","filterSalesPerson","filterMonth"].forEach(id => {
   $(id).addEventListener("input", renderLeadsTable);
   $(id).addEventListener("change", renderLeadsTable);
 });
+
+// Shared status-change logic -- used by both the F2/F4 keyboard shortcuts
+// and the click buttons in the table/modal, so they always stay in sync.
+async function markLeadWon(leadId){
+  const lead = leads.find(l => l.id === leadId);
+  if(!lead) return;
+  const update = {
+    leadStatus: "Won", orderStatus: "Confirmed", leadConsumption: "Converted",
+    updatedAt: serverTimestamp()
+  };
+  if(!lead.reorderReminderDate){
+    update.reorderReminderDate = addDays(todayISO(), reorderCycleDays);
+    update.reorderLog = [];
+  }
+  try{
+    await updateDoc(doc(db, "leads", leadId), update);
+    toast(`${lead.clientName || "Lead"} marked Won & Order Confirmed`);
+  }catch(err){
+    console.error(err);
+    toast("Couldn't update that lead — try again.");
+  }
+}
+
+async function markLeadLost(leadId){
+  const lead = leads.find(l => l.id === leadId);
+  if(!lead) return;
+  try{
+    await updateDoc(doc(db, "leads", leadId), {
+      leadStatus: "Lost", leadConsumption: "Consumed", updatedAt: serverTimestamp()
+    });
+    toast(`${lead.clientName || "Lead"} marked Lapsed`);
+  }catch(err){
+    console.error(err);
+    toast("Couldn't update that lead — try again.");
+  }
+}
+
+// Undoes a Won or Lost marking, back to a neutral open state -- picks the
+// follow-up cadence back up with a fresh 3-day cycle, since the query is
+// active again.
+async function reopenLead(leadId){
+  const lead = leads.find(l => l.id === leadId);
+  if(!lead) return;
+  try{
+    await updateDoc(doc(db, "leads", leadId), {
+      leadStatus: "New", orderStatus: "Pending", leadConsumption: "Active",
+      followUpDate: addDays(todayISO(), FOLLOWUP_CYCLE_DAYS),
+      updatedAt: serverTimestamp()
+    });
+    toast(`${lead.clientName || "Lead"} reopened as an active query.`);
+  }catch(err){
+    console.error(err);
+    toast("Couldn't reopen that lead — try again.");
+  }
+}
 
 // ---------------------------------------------------------------------------
 // F2 / F4 shortcuts -- act on whichever lead row the mouse is hovering
@@ -361,33 +433,8 @@ document.addEventListener("keydown", async (e) => {
   const tr = document.querySelector(`#leadsBody tr[data-id="${hoveredLeadId}"]`);
   if(tr){ tr.classList.add("row-flash"); setTimeout(() => tr.classList.remove("row-flash"), 400); }
 
-  try{
-    if(e.key === "F2"){
-      // Query closed & order confirmed -- also kicks off the re-order
-      // reminder cycle, so someone gets nudged to reconnect with this
-      // customer later for repeat business, not just this one order.
-      const update = {
-        leadStatus: "Won", orderStatus: "Confirmed", leadConsumption: "Converted",
-        updatedAt: serverTimestamp()
-      };
-      if(!lead.reorderReminderDate){
-        update.reorderReminderDate = addDays(todayISO(), reorderCycleDays);
-        update.reorderLog = [];
-      }
-      await updateDoc(doc(db, "leads", hoveredLeadId), update);
-      toast(`${lead.clientName || "Lead"} marked Won & Order Confirmed`);
-    }else{
-      // Query lapsed
-      await updateDoc(doc(db, "leads", hoveredLeadId), {
-        leadStatus: "Lost", leadConsumption: "Consumed",
-        updatedAt: serverTimestamp()
-      });
-      toast(`${lead.clientName || "Lead"} marked Lapsed`);
-    }
-  }catch(err){
-    console.error(err);
-    toast("Couldn't update that lead — try again.");
-  }
+  if(e.key === "F2") markLeadWon(hoveredLeadId);
+  else markLeadLost(hoveredLeadId);
 });
 
 // ---------------------------------------------------------------------------
@@ -423,6 +470,11 @@ function openLeadModal(id){
   $("f-followUpNote").value = "";
 
   const isWon = lead && lead.leadStatus === "Won";
+  const isClosed = lead && (lead.leadStatus === "Won" || lead.leadStatus === "Lost");
+  $("modalMarkWonBtn").classList.toggle("hidden", !lead || isClosed);
+  $("modalMarkLostBtn").classList.toggle("hidden", !lead || isClosed);
+  $("modalReopenBtn").classList.toggle("hidden", !lead || !isClosed);
+
   $("reorderSection").classList.toggle("hidden", !isWon);
   if(isWon){
     renderReorderLog(lead);
@@ -458,6 +510,22 @@ function renderFollowUpLog(lead){
 
 $("newLeadBtn").onclick = () => openLeadModal(null);
 $("leadCancelBtn").onclick = () => $("leadOverlay").classList.add("hidden");
+
+$("modalMarkWonBtn").onclick = async () => {
+  if(!editingLeadId) return;
+  await markLeadWon(editingLeadId);
+  openLeadModal(editingLeadId);
+};
+$("modalMarkLostBtn").onclick = async () => {
+  if(!editingLeadId) return;
+  await markLeadLost(editingLeadId);
+  openLeadModal(editingLeadId);
+};
+$("modalReopenBtn").onclick = async () => {
+  if(!editingLeadId) return;
+  await reopenLead(editingLeadId);
+  openLeadModal(editingLeadId);
+};
 
 autoCurrencyFromCountry("f-country", "f-currency");
 
