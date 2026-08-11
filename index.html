@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Turbo Tech Engineers — Sales CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#EEEEE3;
+    --paper-raised:#FFFFFC;
+    --ink:#1E2A38;
+    --ink-soft:#4C5A6B;
+    --line:#D8D5C6;
+    --rust:#B33A2E;
+    --rust-bg:#F6E2DE;
+    --mustard:#B87B15;
+    --mustard-bg:#F5E7CB;
+    --slate:#3A5A78;
+    --slate-bg:#DEE7EE;
+    --forest:#3F6B4F;
+    --forest-bg:#DEE9E1;
+    --gray-bg:#E4E2D8;
+    --teal:#1D6B63;
+    --teal-bg:#DCEBE9;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+  }
+  ::selection{ background:var(--mustard-bg); }
+  .hidden{ display:none !important; }
+  button{ font-family:inherit; cursor:pointer; }
+  input, select, textarea{ font-family:inherit; }
+
+  /* ---------- Login ---------- */
+  #loginScreen{
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    padding:1.5rem;
+  }
+  .login-card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:2.4rem 2.2rem;
+    width:100%; max-width:380px;
+    box-shadow:0 10px 30px rgba(30,42,56,0.08);
+  }
+  .login-card h1{
+    font-size:1.3rem; margin:0 0 0.2rem;
+    letter-spacing:0.3px;
+  }
+  .login-card .sub{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:0.7rem; text-transform:uppercase; letter-spacing:1px;
+    color:var(--ink-soft); margin-bottom:1.6rem;
+  }
+  .field{ margin-bottom:1rem; }
+  .field label{
+    display:block; font-size:0.78rem; font-weight:600; margin-bottom:0.35rem; color:var(--ink-soft);
+  }
+  .field input, .field select, .field textarea{
+    width:100%; padding:0.6rem 0.7rem; border:1px solid var(--line); border-radius:6px;
+    background:var(--paper-raised); color:var(--ink); font-size:0.92rem;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{
+    outline:none; border-color:var(--slate);
+  }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:0.4rem;
+    padding:0.6rem 1rem; border-radius:6px; border:1px solid var(--ink);
+    background:var(--ink); color:#fff; font-size:0.85rem; font-weight:600;
+  }
+  .btn:hover{ opacity:0.9; }
+  .btn.secondary{ background:transparent; color:var(--ink); }
+  .btn.rust{ background:var(--rust); border-color:var(--rust); }
+  .btn.forest{ background:var(--forest); border-color:var(--forest); }
+  .btn.slate{ background:var(--slate); border-color:var(--slate); }
+  .btn.full{ width:100%; }
+  .btn.small{ padding:0.35rem 0.65rem; font-size:0.75rem; }
+  .btn:disabled{ opacity:0.5; cursor:not-allowed; }
+  .error-text{ color:var(--rust); font-size:0.8rem; margin-top:0.6rem; min-height:1em; }
+
+  /* ---------- App shell ---------- */
+  #appScreen{ min-height:100vh; }
+  header.topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0.9rem 1.6rem; border-bottom:2px solid var(--ink);
+    background:var(--paper-raised); flex-wrap:wrap; gap:0.6rem;
+  }
+  header.topbar .brand{ display:flex; align-items:baseline; gap:0.6rem; }
+  header.topbar h1{ font-size:1.05rem; margin:0; letter-spacing:0.2px; }
+  header.topbar .tag{
+    font-family:'IBM Plex Mono',monospace; font-size:0.65rem; text-transform:uppercase;
+    letter-spacing:1px; color:var(--ink-soft);
+  }
+  .user-chip{
+    display:flex; align-items:center; gap:0.6rem;
+    font-size:0.82rem;
+  }
+  .role-badge{
+    font-family:'IBM Plex Mono',monospace; font-size:0.65rem; text-transform:uppercase;
+    letter-spacing:0.5px; padding:0.15rem 0.5rem; border-radius:4px;
+    background:var(--slate-bg); color:var(--slate);
+  }
+  .role-badge.master{ background:var(--rust-bg); color:var(--rust); }
+  .role-badge.manager{ background:var(--mustard-bg); color:var(--mustard); }
+
+  nav.tabs{
+    display:flex; gap:0.3rem; padding:0 1.6rem; border-bottom:1px solid var(--line);
+    background:var(--paper-raised); overflow-x:auto;
+  }
+  nav.tabs button{
+    padding:0.75rem 0.9rem; border:none; background:transparent; color:var(--ink-soft);
+    font-size:0.85rem; font-weight:600; border-bottom:2px solid transparent; white-space:nowrap;
+  }
+  nav.tabs button.active{ color:var(--ink); border-bottom-color:var(--ink); }
+
+  main{ padding:1.4rem 1.6rem 3rem; max-width:1500px; margin:0 auto; }
+  .panel{
+    background:var(--paper-raised); border:1px solid var(--line); border-radius:8px;
+    padding:1.2rem; margin-bottom:1.2rem;
+  }
+  .panel h2{ font-size:1rem; margin:0 0 1rem; }
+  .toolbar{
+    display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; margin-bottom:1rem;
+  }
+  .toolbar input[type="text"], .toolbar select, .toolbar input[type="date"]{
+    padding:0.5rem 0.65rem; border:1px solid var(--line); border-radius:6px;
+    background:var(--paper-raised); font-size:0.82rem;
+  }
+  .spacer{ flex:1; }
+
+  table{ width:100%; border-collapse:collapse; font-size:0.82rem; }
+  thead th{
+    text-align:left; padding:0.55rem 0.6rem; font-size:0.68rem; text-transform:uppercase;
+    letter-spacing:0.5px; color:var(--ink-soft); border-bottom:2px solid var(--ink);
+    white-space:nowrap; position:sticky; top:0; background:var(--paper-raised);
+  }
+  tbody td{ padding:0.55rem 0.6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  tbody tr:hover{ background:var(--slate-bg); }
+  tbody tr.row-flash{ background:var(--forest-bg) !important; transition:background 0.3s; }
+
+  .badge{
+    display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:0.65rem;
+    text-transform:uppercase; letter-spacing:0.4px; padding:0.15rem 0.5rem; border-radius:4px;
+    white-space:nowrap;
+  }
+  .badge.new{ background:var(--slate-bg); color:var(--slate); }
+  .badge.contacted{ background:var(--mustard-bg); color:var(--mustard); }
+  .badge.quoted{ background:var(--teal-bg); color:var(--teal); }
+  .badge.followup{ background:var(--mustard-bg); color:var(--mustard); }
+  .badge.negotiation{ background:var(--mustard-bg); color:var(--mustard); }
+  .badge.won{ background:var(--forest-bg); color:var(--forest); }
+  .badge.lost{ background:var(--rust-bg); color:var(--rust); }
+
+  .icon-btn{
+    padding:0.3rem 0.55rem; border:1px solid var(--line); border-radius:5px;
+    background:var(--paper-raised); font-size:0.72rem; color:var(--ink);
+  }
+  .icon-btn:hover{ border-color:var(--ink); }
+
+  /* ---------- Modal ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(30,42,56,0.45);
+    display:flex; align-items:center; justify-content:center; padding:1.2rem; z-index:500;
+  }
+  .modal{
+    background:var(--paper-raised); border-radius:10px; width:100%; max-width:720px;
+    max-height:90vh; overflow-y:auto; padding:1.6rem;
+  }
+  .modal.wide{ max-width:920px; }
+  .modal h2{ margin:0 0 1rem; font-size:1.05rem; }
+  .modal .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:0.9rem; }
+  .modal .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.9rem; }
+  @media (max-width:640px){
+    .modal .grid2, .modal .grid3{ grid-template-columns:1fr; }
+  }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:0.6rem; margin-top:1.4rem; }
+
+  .kbd-hint{
+    font-family:'IBM Plex Mono',monospace; font-size:0.7rem; border:1px solid var(--line);
+    border-radius:4px; padding:1px 6px; background:var(--paper);
+  }
+  .hint-bar{
+    font-size:0.78rem; color:var(--ink-soft); margin:-0.4rem 0 1rem;
+  }
+
+  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:0.9rem; }
+  .stat-card{
+    background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:1rem;
+  }
+  .stat-card .num{ font-size:1.6rem; font-weight:700; }
+  .stat-card .label{ font-size:0.72rem; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px; }
+
+  .toast{
+    position:fixed; bottom:1.2rem; right:1.2rem; background:var(--ink); color:#fff;
+    padding:0.7rem 1rem; border-radius:8px; font-size:0.85rem; z-index:900;
+    box-shadow:0 8px 24px rgba(0,0,0,0.2);
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== LOGIN ============== -->
+<div id="loginScreen">
+  <div class="login-card">
+    <h1>Turbo Tech Engineers</h1>
+    <div class="sub">Sales CRM — Sign in</div>
+    <div class="field">
+      <label for="loginEmail">Email</label>
+      <input type="email" id="loginEmail" placeholder="name@turbotech.in" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn full" id="loginBtn">Sign In</button>
+    <div class="error-text" id="loginError"></div>
+  </div>
+</div>
+
+<!-- ============== APP ============== -->
+<div id="appScreen" class="hidden">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Turbo Tech Engineers</h1>
+      <span class="tag">Sales CRM</span>
+    </div>
+    <div class="user-chip">
+      <span id="userName">—</span>
+      <span class="role-badge" id="userRoleBadge">—</span>
+      <button class="icon-btn" id="signOutBtn">Sign Out</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="leads">Leads</button>
+    <button class="tab-btn" data-tab="tasks">Daily Tasks</button>
+    <button class="tab-btn" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn hidden" data-tab="users" id="usersTabBtn">Users</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+  </nav>
+
+  <main>
+    <!-- ===== LEADS TAB ===== -->
+    <section id="tab-leads" class="tab-section">
+      <div class="hint-bar">Hover a row, then <span class="kbd-hint">F2</span> marks the query closed &amp; order confirmed · <span class="kbd-hint">F4</span> marks it lapsed.</div>
+      <div class="panel">
+        <div class="toolbar">
+          <input type="text" id="leadSearch" placeholder="Search client, part no., city...">
+          <select id="filterStatus">
+            <option value="">All Statuses</option>
+            <option>New</option><option>Contacted</option><option>Quoted</option>
+            <option>Follow-up</option><option>Negotiation</option><option>Won</option><option>Lost</option>
+          </select>
+          <select id="filterSalesPerson" class="hidden"></select>
+          <select id="filterMonth"></select>
+          <div class="spacer"></div>
+          <button class="btn secondary" id="bulkImportBtn">Bulk Import Part Numbers</button>
+          <button class="btn" id="newLeadBtn">+ New Lead</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="leadsTable">
+            <thead>
+              <tr>
+                <th>Date</th><th>Client</th><th>Country</th><th>Sales Person</th>
+                <th>Part No.</th><th>Qty</th><th>Quoted Value</th><th>Status</th>
+                <th>Follow-up</th><th>Order Value</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="leadsBody"></tbody>
+          </table>
+        </div>
+        <div id="leadsEmpty" class="hint-bar hidden">No leads match the current filters.</div>
+      </div>
+    </section>
+
+    <!-- ===== DAILY TASKS TAB ===== -->
+    <section id="tab-tasks" class="tab-section hidden">
+      <div class="panel">
+        <h2>Today's Follow-ups</h2>
+        <div id="tasksToday"></div>
+      </div>
+      <div class="panel">
+        <h2>Overdue Follow-ups</h2>
+        <div id="tasksOverdue"></div>
+      </div>
+      <div class="panel">
+        <h2>Re-order Reminders — Check In With Won Customers</h2>
+        <div class="hint-bar">Customers whose order was confirmed a while back — worth reconnecting for repeat business.</div>
+        <div id="tasksReorder"></div>
+      </div>
+    </section>
+
+    <!-- ===== DASHBOARD TAB ===== -->
+    <section id="tab-dashboard" class="tab-section hidden">
+      <div class="panel">
+        <div class="toolbar">
+          <select id="dashMonth"></select>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="num" id="statTotal">0</div><div class="label">Total Inquiries</div></div>
+          <div class="stat-card"><div class="num" id="statQuoted">0</div><div class="label">Quoted Leads</div></div>
+          <div class="stat-card"><div class="num" id="statWon">0</div><div class="label">Won Orders</div></div>
+          <div class="stat-card"><div class="num" id="statLost">0</div><div class="label">Lost / Consumed</div></div>
+          <div class="stat-card"><div class="num" id="statOrderValue">₹0</div><div class="label">Won Order Value (INR)</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== USERS TAB (master only) ===== -->
+    <section id="tab-users" class="tab-section hidden">
+      <div class="panel">
+        <h2>Team</h2>
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>Add Team Member</h2>
+        <div class="grid3" style="display:grid;">
+          <div class="field"><label>Name</label><input type="text" id="newUserName"></div>
+          <div class="field"><label>Email</label><input type="email" id="newUserEmail"></div>
+          <div class="field"><label>Temporary Password</label><input type="text" id="newUserPassword"></div>
+          <div class="field"><label>Role</label>
+            <select id="newUserRole"><option value="sales">Sales</option><option value="manager">Manager</option><option value="master">Master</option></select>
+          </div>
+        </div>
+        <button class="btn" id="addUserBtn">Add Team Member</button>
+        <div class="error-text" id="userError"></div>
+      </div>
+    </section>
+
+    <!-- ===== SETTINGS TAB ===== -->
+    <section id="tab-settings" class="tab-section hidden">
+      <div class="panel">
+        <h2>Exchange Rates (to INR)</h2>
+        <div class="hint-bar">Used to auto-convert Quoted/Order Value into INR when the currency isn't INR. Update whenever rates move.</div>
+        <div class="grid3" style="display:grid;">
+          <div class="field"><label>1 USD =</label><input type="number" step="0.01" id="rateUSD"></div>
+          <div class="field"><label>1 EUR =</label><input type="number" step="0.01" id="rateEUR"></div>
+          <div class="field"><label>1 RMB =</label><input type="number" step="0.01" id="rateRMB"></div>
+        </div>
+        <button class="btn" id="saveRatesBtn">Save Rates</button>
+        <span class="hint-bar" id="ratesSavedMsg"></span>
+      </div>
+      <div class="panel">
+        <h2>Re-order Reminder</h2>
+        <div class="hint-bar">Once a lead is marked Won, the CRM reminds someone to reconnect with that customer this many days later — a nudge to check in for repeat orders, not just chase the original one.</div>
+        <div class="field" style="max-width:220px;">
+          <label>Remind after (days)</label>
+          <input type="number" min="1" id="reorderCycleDaysInput">
+        </div>
+        <button class="btn" id="saveReorderBtn">Save</button>
+        <span class="hint-bar" id="reorderSavedMsg"></span>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============== LEAD MODAL ============== -->
+<div id="leadOverlay" class="overlay hidden">
+  <div class="modal">
+    <h2 id="leadModalTitle">New Lead</h2>
+    <div class="grid2">
+      <div class="field"><label>Inquiry Date</label><input type="date" id="f-date"></div>
+      <div class="field"><label>Client Name</label><input type="text" id="f-client"></div>
+      <div class="field"><label>Client Type</label>
+        <select id="f-clientType"><option>Domestic</option><option>International</option></select>
+      </div>
+      <div class="field"><label>Country</label><input type="text" id="f-country" placeholder="India"></div>
+      <div class="field"><label>State / Region</label><input type="text" id="f-state"></div>
+      <div class="field"><label>City</label><input type="text" id="f-city"></div>
+      <div class="field"><label>Sales Person</label><select id="f-salesPerson"></select></div>
+      <div class="field"><label>Lead Source</label>
+        <select id="f-leadSource">
+          <option>Website</option><option>WhatsApp</option><option>Email</option>
+          <option>IndiaMART</option><option>Exhibition</option><option>Cold Call</option><option>Referral</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field"><label>Product Category</label><input type="text" id="f-category"></div>
+      <div class="field"><label>Product / Part No.</label><input type="text" id="f-partNo"></div>
+      <div class="field"><label>Inquiry Qty</label><input type="number" id="f-qty" min="0"></div>
+      <div class="field"><label>Quoted Value</label><input type="number" step="0.01" id="f-quotedValue"></div>
+      <div class="field"><label>Currency</label>
+        <select id="f-currency"><option>INR</option><option>USD</option><option>EUR</option><option>RMB</option></select>
+      </div>
+      <div class="field"><label>Lead Status</label>
+        <select id="f-leadStatus">
+          <option>New</option><option>Contacted</option><option>Quoted</option>
+          <option>Follow-up</option><option>Negotiation</option><option>Won</option><option>Lost</option>
+        </select>
+      </div>
+      <div class="field"><label>Follow-up Date</label><input type="date" id="f-followUpDate"></div>
+      <div class="field"><label>Expected Closing Date</label><input type="date" id="f-expectedClosing"></div>
+      <div class="field"><label>Order Status</label>
+        <select id="f-orderStatus"><option>Pending</option><option>Confirmed</option><option>Dispatched</option><option>Cancelled</option></select>
+      </div>
+      <div class="field"><label>Order Value</label><input type="number" step="0.01" id="f-orderValue"></div>
+      <div class="field"><label>Order Currency</label>
+        <select id="f-orderCurrency"><option>INR</option><option>USD</option><option>EUR</option><option>RMB</option></select>
+      </div>
+      <div class="field"><label>Lead Consumption</label>
+        <select id="f-leadConsumption"><option>Active</option><option>Converted</option><option>Consumed</option></select>
+      </div>
+    </div>
+    <div class="field"><label>Remarks</label><textarea id="f-remarks" rows="2"></textarea></div>
+
+    <div class="field">
+      <label>Follow-up Log</label>
+      <div id="followUpLogList" style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:0.5rem;"></div>
+      <div style="display:flex; gap:0.5rem;">
+        <input type="text" id="f-followUpNote" placeholder="What was done for this follow-up...">
+        <button class="btn small secondary" id="addFollowUpNoteBtn">Add Note</button>
+      </div>
+    </div>
+
+    <div class="field hidden" id="reorderSection">
+      <label>Re-order Contact Log <span class="hint-bar" id="reorderNextDateLabel" style="display:inline;"></span></label>
+      <div id="reorderLogList" style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:0.5rem;"></div>
+      <div style="display:flex; gap:0.5rem;">
+        <input type="text" id="f-reorderNote" placeholder="What happened when you reconnected...">
+        <button class="btn small secondary" id="addReorderNoteBtn">Log Contact</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn secondary" id="leadCancelBtn">Cancel</button>
+      <button class="btn rust hidden" id="leadDeleteBtn">Delete</button>
+      <button class="btn" id="leadSaveBtn">Save Lead</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============== BULK IMPORT MODAL ============== -->
+<div id="bulkOverlay" class="overlay hidden">
+  <div class="modal wide">
+    <h2>Bulk Import — Multiple Part Numbers, One Inquiry</h2>
+    <div class="hint-bar">Fill the shared details once, then paste part numbers (one per line — optionally <span class="kbd-hint">part no., qty</span> comma-separated) copied straight from Excel. Each line becomes its own lead row.</div>
+    <div class="grid3">
+      <div class="field"><label>Inquiry Date</label><input type="date" id="b-date"></div>
+      <div class="field"><label>Client Name</label><input type="text" id="b-client"></div>
+      <div class="field"><label>Client Type</label>
+        <select id="b-clientType"><option>Domestic</option><option>International</option></select>
+      </div>
+      <div class="field"><label>Country</label><input type="text" id="b-country" placeholder="India"></div>
+      <div class="field"><label>State / Region</label><input type="text" id="b-state"></div>
+      <div class="field"><label>City</label><input type="text" id="b-city"></div>
+      <div class="field"><label>Sales Person</label><select id="b-salesPerson"></select></div>
+      <div class="field"><label>Lead Source</label>
+        <select id="b-leadSource">
+          <option>Website</option><option>WhatsApp</option><option>Email</option>
+          <option>IndiaMART</option><option>Exhibition</option><option>Cold Call</option><option>Referral</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field"><label>Currency</label>
+        <select id="b-currency"><option>INR</option><option>USD</option><option>EUR</option><option>RMB</option></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Part Numbers (one per line)</label>
+      <textarea id="b-partNumbers" rows="8" placeholder="HT60 TURBO, 2&#10;5555065&#10;5501243, 3"></textarea>
+    </div>
+    <div class="hint-bar" id="bulkPreviewCount"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="bulkCancelBtn">Cancel</button>
+      <button class="btn" id="bulkSaveBtn">Create Leads</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
