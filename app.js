@@ -69,6 +69,15 @@ function monthKey(dateStr){
 function escapeHtml(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
+// Normalizes a typed name to Title Case ("yashvi" -> "Yashvi") -- names are
+// matched exactly (case-sensitive) everywhere in the app (task/lead
+// assignment, security rules), so inconsistent capitalization at entry
+// time is what silently breaks "my tasks/leads aren't showing up" later.
+function titleCase(str){
+  return String(str||"").trim().split(/\s+/).filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
 function statusBadgeClass(status){
   const map = {
     "New":"new", "Contacted":"contacted", "Quoted":"quoted", "Follow-up":"followup",
@@ -1037,9 +1046,12 @@ function openUserEditModal(uid){
 }
 $("userEditCancelBtn").onclick = () => $("userEditOverlay").classList.add("hidden");
 
+$("eu-name").addEventListener("blur", () => { $("eu-name").value = titleCase($("eu-name").value); });
+$("newUserName").addEventListener("blur", () => { $("newUserName").value = titleCase($("newUserName").value); });
+
 $("userEditSaveBtn").onclick = async () => {
   if(!editingUserId) return;
-  const name = $("eu-name").value.trim();
+  const name = titleCase($("eu-name").value);
   const role = $("eu-role").value;
   if(!name){ $("userEditError").textContent = "Name can't be empty."; return; }
   try{
@@ -1067,7 +1079,7 @@ $("sendResetEmailBtn").onclick = async () => {
 // Creates a new team member's login WITHOUT signing the master out of their
 // own session -- done via a throwaway secondary Firebase app instance.
 $("addUserBtn").onclick = async () => {
-  const name = $("newUserName").value.trim();
+  const name = titleCase($("newUserName").value);
   const email = $("newUserEmail").value.trim();
   const password = $("newUserPassword").value;
   const role = $("newUserRole").value;
