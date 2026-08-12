@@ -52,9 +52,10 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isMasterOrManager() || resource.data.assignedTo == myName()
       );
-      allow create: if isSignedIn() && (
-        isMasterOrManager() || request.resource.data.assignedTo == myName()
-      );
+      // Anyone signed in can create a task assigned to ANY team member --
+      // this is what powers "Send as Task" from a lead and general
+      // task-handoff between team members, not just master/manager.
+      allow create: if isSignedIn();
       allow update: if isSignedIn() && (
         isMasterOrManager() || resource.data.assignedTo == myName()
       );

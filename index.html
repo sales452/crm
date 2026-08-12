@@ -159,7 +159,15 @@
   .badge.negotiation{ background:var(--mustard-bg); color:var(--mustard); }
   .badge.won{ background:var(--forest-bg); color:var(--forest); }
   .badge.lost{ background:var(--rust-bg); color:var(--rust); }
-  .badge.taskdone{ background:var(--blue-bg); color:var(--blue); }
+  .badge.taskdone{ background:var(--forest-bg); color:var(--forest); }
+
+  .task-row{ border-radius:6px; padding:0.7rem 0.6rem; transition:background 0.2s; }
+  .task-row.done{
+    background:var(--forest-bg);
+    border-bottom-color:transparent !important;
+  }
+  .task-row.done strong{ color:var(--forest); text-decoration:line-through; text-decoration-color:var(--forest); text-decoration-thickness:1.5px; }
+  .task-row.overdue{ background:var(--rust-bg); }
 
   .icon-btn{
     padding:0.3rem 0.55rem; border:1px solid var(--line); border-radius:5px;
@@ -516,6 +524,7 @@
       <button class="btn forest hidden" id="modalMarkWonBtn">✓ Mark Won</button>
       <button class="btn rust hidden" id="modalMarkLostBtn">✕ Mark Lost</button>
       <button class="btn secondary hidden" id="modalReopenBtn">↺ Reopen</button>
+      <button class="btn secondary hidden" id="sendAsTaskBtn" title="Ping someone about this lead without transferring it">📨 Send as Task</button>
       <div class="spacer"></div>
       <button class="btn secondary" id="leadCancelBtn">Cancel</button>
       <button class="btn rust hidden" id="leadDeleteBtn">Delete</button>
@@ -528,6 +537,7 @@
 <div id="taskOverlay" class="overlay hidden">
   <div class="modal">
     <h2 id="taskModalTitle">New Task</h2>
+    <div class="hint-bar hidden" id="taskLeadLinkHint" style="margin-bottom:0.5rem;"></div>
     <div class="field"><label>What needs doing</label><input type="text" id="t-title" placeholder="e.g. Call Bosch distributor about stock"></div>
     <div class="grid2">
       <div class="field"><label>Due Date</label><input type="date" id="t-dueDate"></div>

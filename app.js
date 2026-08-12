@@ -237,13 +237,15 @@ function populateSalesPersonSelects(){
   const opts = names.map(n => `<option value="${n}">${n}</option>`).join("");
   $("f-salesPerson").innerHTML = opts;
   $("b-salesPerson").innerHTML = opts;
-  $("t-assignedTo").innerHTML = opts;
+  $("t-assignedTo").innerHTML = `<option value="">Choose who...</option>` + opts;
   $("filterSalesPerson").innerHTML = `<option value="">All Sales People</option>` + opts;
 
   if(currentRole === "sales"){
-    // Sales reps only ever create/see their own leads
+    // Sales reps' own leads default to their own name, but the dropdown
+    // stays enabled -- anyone can hand a lead off to a teammate, not just
+    // master/manager. Bulk import keeps the shared-inquiry field locked to
+    // the importer, since that's a batch of the importer's own leads.
     $("f-salesPerson").value = currentName;
-    $("f-salesPerson").disabled = true;
     $("b-salesPerson").value = currentName;
     $("b-salesPerson").disabled = true;
     $("t-assignedTo").value = currentName;
@@ -396,6 +398,7 @@ function renderLeadsTable(){
         <td>${orderDisplay}</td>
         <td style="white-space:nowrap;">
           <button class="icon-btn" data-action="edit" data-id="${l.id}">Open</button>
+          <button class="icon-btn" data-action="send-task" data-id="${l.id}" title="Ping someone about this lead">📨</button>
           ${statusButtons}
         </td>
       </tr>
@@ -418,6 +421,9 @@ function renderLeadsTable(){
   });
   $("leadsBody").querySelectorAll('[data-action="reopen"]').forEach(btn => {
     btn.onclick = () => reopenLead(btn.dataset.id);
+  });
+  $("leadsBody").querySelectorAll('[data-action="send-task"]').forEach(btn => {
+    btn.onclick = () => openSendAsTaskFlow(btn.dataset.id);
   });
 }
 
@@ -563,12 +569,11 @@ function openLeadModal(id){
   $("leadDeleteBtn").classList.toggle("hidden", !lead || currentRole === "sales");
 
   for(const [field, elId] of Object.entries(LEAD_FIELD_IDS)){
-    $(elId).value = lead ? (lead[field] ?? "") : (field === "inquiryDate" ? todayISO() : (field === "clientType" ? "Domestic" : (field === "leadStatus" ? "New" : (field === "orderStatus" ? "Pending" : (field === "leadConsumption" ? "Active" : (field === "quotedCurrency" || field === "orderCurrency" ? "INR" : ""))))));
+    $(elId).value = lead ? (lead[field] ?? "") : (field === "inquiryDate" ? todayISO() : (field === "clientType" ? "Domestic" : (field === "leadStatus" ? "New" : (field === "orderStatus" ? "Pending" : (field === "leadConsumption" ? "Active" : (field === "quotedCurrency" || field === "orderCurrency" ? "INR" : (field === "salesPerson" ? currentName : "")))))));
   }
-  if(currentRole === "sales") $("f-salesPerson").value = currentName;
-  $("transferHint").textContent = (currentRole === "master" || currentRole === "manager")
-    ? "Changing this and saving transfers the lead to that person — it's logged below."
-    : "";
+  // Anyone can hand a lead to a teammate, not just master/manager --
+  // changing this dropdown and saving logs the transfer below.
+  $("transferHint").textContent = "Changing this and saving transfers the lead to that person — it's logged below.";
 
   renderTransferLog(lead);
   renderFollowUpLog(lead);
@@ -578,6 +583,8 @@ function openLeadModal(id){
   // modal session never lingers.
   $("clientHistoryHint").innerHTML = "";
   $("lastPriceHint").innerHTML = "";
+
+  $("sendAsTaskBtn").classList.toggle("hidden", !lead);
 
   const isWon = lead && lead.leadStatus === "Won";
   const isClosed = lead && (lead.leadStatus === "Won" || lead.leadStatus === "Lost");
@@ -1048,15 +1055,17 @@ function renderManualTasks(){
 
   const renderRow = (t) => {
     const overdue = !t.done && t.dueDate && t.dueDate < today;
-    const dueLabel = t.done ? "Done" : (t.dueDate === today ? "Today" : (overdue ? `Overdue since ${t.dueDate}` : t.dueDate));
+    const dueLabel = t.done ? "✓ Done" : (t.dueDate === today ? "Today" : (overdue ? `Overdue since ${t.dueDate}` : t.dueDate));
     const badgeClass = t.done ? "taskdone" : (overdue ? "lost" : "new");
+    const rowClass = "task-row" + (t.done ? " done" : (overdue ? " overdue" : ""));
     return `
-      <div class="task-row" data-id="${t.id}" style="padding:0.7rem 0; border-bottom:1px solid var(--line); ${t.done ? "opacity:0.75;" : ""}">
+      <div class="${rowClass}" data-id="${t.id}" style="border-bottom:1px solid var(--line);">
         <div style="display:flex; justify-content:space-between; gap:0.6rem; flex-wrap:wrap;">
           <strong>${escapeHtml(t.title||"")}</strong>
           <span class="badge ${badgeClass}">${escapeHtml(dueLabel||"No date")}</span>
         </div>
         <div class="hint-bar" style="margin:0.2rem 0;">Assigned to ${escapeHtml(t.assignedTo||"")}${t.notes ? " · " + escapeHtml(t.notes) : ""}</div>
+        ${t.relatedLeadId && leads.some(l => l.id === t.relatedLeadId) ? `<button class="icon-btn" data-action="task-view-lead" data-id="${t.id}" style="margin-bottom:0.4rem;">🔗 View Lead: ${escapeHtml(t.relatedLeadClient||"")}</button><br>` : (t.relatedLeadClient ? `<div class="hint-bar" style="margin-bottom:0.4rem;">🔗 About lead: ${escapeHtml(t.relatedLeadClient)}</div>` : "")}
         ${t.done
           ? `<button class="icon-btn" data-action="task-reopen" data-id="${t.id}" title="Undo (F4)">↺ Reopen</button>`
           : `<button class="icon-btn" data-action="task-done" data-id="${t.id}" title="Mark Done (F2)">✓ Mark Done</button>`}
@@ -1081,6 +1090,15 @@ function renderManualTasks(){
   $("tasksManual").querySelectorAll('[data-action="task-edit"]').forEach(btn => {
     btn.onclick = () => openTaskEditModal(btn.dataset.id);
   });
+  $("tasksManual").querySelectorAll('[data-action="task-view-lead"]').forEach(btn => {
+    btn.onclick = () => {
+      const t = tasks.find(x => x.id === btn.dataset.id);
+      if(!t || !t.relatedLeadId) return;
+      const tab = document.querySelector('.tab-btn[data-tab="leads"]');
+      if(tab) tab.click();
+      openLeadModal(t.relatedLeadId);
+    };
+  });
   $("tasksManual").querySelectorAll('[data-action="task-delete"]').forEach(btn => {
     btn.onclick = async () => {
       if(!confirm("Delete this task?")) return;
@@ -1091,10 +1109,13 @@ function renderManualTasks(){
 }
 
 let editingTaskId = null;
+let pendingTaskLeadId = null;   // set when a task is being created via "Send as Task" from a lead
 
 $("addTaskBtn").onclick = () => {
   editingTaskId = null;
+  pendingTaskLeadId = null;
   $("taskModalTitle").textContent = "New Task";
+  $("taskLeadLinkHint").classList.add("hidden");
   $("t-title").value = "";
   $("t-dueDate").value = todayISO();
   $("t-notes").value = "";
@@ -1107,7 +1128,10 @@ function openTaskEditModal(taskId){
   const task = tasks.find(t => t.id === taskId);
   if(!task) return;
   editingTaskId = taskId;
+  pendingTaskLeadId = null;
   $("taskModalTitle").textContent = "Edit Task";
+  $("taskLeadLinkHint").classList.toggle("hidden", !task.relatedLeadClient);
+  if(task.relatedLeadClient) $("taskLeadLinkHint").textContent = `🔗 Linked to lead: ${task.relatedLeadClient}`;
   $("t-title").value = task.title || "";
   $("t-dueDate").value = task.dueDate || todayISO();
   $("t-assignedTo").value = task.assignedTo || "";
@@ -1116,11 +1140,38 @@ function openTaskEditModal(taskId){
   $("taskOverlay").classList.remove("hidden");
 }
 
+// Opens the task modal pre-filled from a lead, so anyone -- master, manager,
+// or a sales rep -- can ping a teammate about a specific query without
+// handing over ownership of the lead itself. Saving creates a normal task
+// (rings the assignee's bell, same as any other new task) that also carries
+// a link back to the lead it came from.
+function openSendAsTaskFlow(leadId){
+  const lead = leads.find(l => l.id === leadId);
+  if(!lead){ toast("Couldn't find that lead — try refreshing."); return; }
+  editingTaskId = null;
+  pendingTaskLeadId = leadId;
+  $("taskModalTitle").textContent = "Send Lead as Task";
+  $("taskLeadLinkHint").classList.remove("hidden");
+  $("taskLeadLinkHint").textContent = `🔗 About lead: ${lead.clientName || "—"} · ${lead.partNo || "—"}`;
+  $("t-title").value = `Follow up: ${lead.clientName || "lead"}${lead.partNo ? " — " + lead.partNo : ""}`;
+  $("t-dueDate").value = todayISO();
+  $("t-assignedTo").value = "";
+  $("t-notes").value = [
+    lead.leadStatus ? `Status: ${lead.leadStatus}` : "",
+    lead.quotedValue ? `Quoted: ${lead.quotedCurrency||"INR"} ${lead.quotedValue}` : "",
+    lead.remarks ? `Remarks: ${lead.remarks}` : ""
+  ].filter(Boolean).join(" · ");
+  $("taskError").textContent = "";
+  $("taskOverlay").classList.remove("hidden");
+}
+$("sendAsTaskBtn").onclick = () => { if(editingLeadId) openSendAsTaskFlow(editingLeadId); };
+
 $("taskCancelBtn").onclick = () => $("taskOverlay").classList.add("hidden");
 
 $("taskSaveBtn").onclick = async () => {
   const title = $("t-title").value.trim();
   if(!title){ $("taskError").textContent = "Enter what needs doing."; return; }
+  if(!$("t-assignedTo").value){ $("taskError").textContent = "Choose who this is assigned to."; return; }
   const data = {
     title,
     dueDate: $("t-dueDate").value || todayISO(),
@@ -1132,11 +1183,17 @@ $("taskSaveBtn").onclick = async () => {
       await updateDoc(doc(db, "tasks", editingTaskId), data);
       toast("Task updated.");
     }else{
+      const lead = pendingTaskLeadId ? leads.find(l => l.id === pendingTaskLeadId) : null;
+      if(lead){
+        data.relatedLeadId = lead.id;
+        data.relatedLeadClient = lead.clientName || "";
+      }
       await addDoc(collection(db, "tasks"), {
         ...data, done: false, createdBy: currentName, createdAt: serverTimestamp()
       });
-      toast("Task added.");
+      toast(lead ? `Sent to ${data.assignedTo} as a task.` : "Task added.");
     }
+    pendingTaskLeadId = null;
     $("taskOverlay").classList.add("hidden");
   }catch(err){
     console.error(err);
