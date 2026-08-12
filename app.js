@@ -58,6 +58,62 @@ function daysSince(dateStr){
   if(isNaN(start)) return 0;
   return Math.floor((now - start) / (1000*60*60*24));
 }
+
+// ---------------------------------------------------------------------------
+// "Open For" digital-clock badge -- a small black/white LED-style timer on
+// each lead row showing exactly how long it's been sitting since it was
+// raised, ticking live, so follow-up urgency is visible at a glance without
+// opening the lead. Won/Lost leads show a static, calmer green badge with
+// the time it took to close rather than a live countdown -- there's nothing
+// left to chase.
+// ---------------------------------------------------------------------------
+function pad2(n){ return String(n).padStart(2, "0"); }
+
+function leadStartMs(l){
+  if(l.createdAt && typeof l.createdAt.toDate === "function") return l.createdAt.toDate().getTime();
+  if(l.inquiryDate){ const d = new Date(l.inquiryDate); if(!isNaN(d)) return d.getTime(); }
+  return Date.now();
+}
+function leadEndMs(l){
+  // For a closed lead, "elapsed" freezes at whenever it was last touched
+  // (updatedAt) rather than ticking forever after being won/lost.
+  if((l.leadStatus === "Won" || l.leadStatus === "Lost") && l.updatedAt && typeof l.updatedAt.toDate === "function"){
+    return l.updatedAt.toDate().getTime();
+  }
+  return Date.now();
+}
+
+function clockBadgeHTML(l){
+  const closed = l.leadStatus === "Won" || l.leadStatus === "Lost";
+  const start = leadStartMs(l);
+  const end = leadEndMs(l);
+  let ms = end - start;
+  if(ms < 0) ms = 0;
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hh = Math.floor((totalSec % 86400) / 3600);
+  const mm = Math.floor((totalSec % 3600) / 60);
+  const ss = totalSec % 60;
+  const urgent = !closed && days >= 7;
+
+  const timeStr = days > 0
+    ? `${days}d ${pad2(hh)}<span class="colon">:</span>${pad2(mm)}`
+    : `${pad2(hh)}<span class="colon">:</span>${pad2(mm)}<span class="colon">:</span>${pad2(ss)}`;
+
+  return `<span class="clock-badge${closed ? " closed" : ""}${urgent ? " urgent" : ""}" `
+    + `data-lead-id="${l.id}" title="${closed ? "Time to close" : "Time open, no resolution yet"}">${timeStr}</span>`;
+}
+
+// Ticks the live badges once a second without a full table re-render --
+// closed leads' badges are frozen already (leadEndMs stops advancing) so
+// this is effectively a no-op for them, just refreshed along with the rest.
+setInterval(() => {
+  document.querySelectorAll(".clock-badge[data-lead-id]").forEach(el => {
+    const lead = leads.find(l => l.id === el.dataset.leadId);
+    if(!lead) return;
+    el.outerHTML = clockBadgeHTML(lead);
+  });
+}, 1000);
 const FOLLOWUP_CYCLE_DAYS = 3;   // prompt again every 3 days while a query is open
 const LEAD_EXPIRY_DAYS = 15;     // no resolution by day 15 -> auto-marked dead
 const OPEN_STATUSES = ["New","Contacted","Quoted","Follow-up","Negotiation"];
@@ -374,6 +430,11 @@ function renderLeadsTable(){
     return true;
   });
 
+  // Won leads sink to the bottom -- they're done, nothing to chase, so they
+  // shouldn't crowd out the open queries that still need follow-up. Stable
+  // sort means everything else keeps its existing (date) order.
+  rows = rows.slice().sort((a, b) => (a.leadStatus === "Won" ? 1 : 0) - (b.leadStatus === "Won" ? 1 : 0));
+
   $("leadsEmpty").classList.toggle("hidden", rows.length > 0);
 
   $("leadsBody").innerHTML = rows.map(l => {
@@ -394,6 +455,7 @@ function renderLeadsTable(){
         <td>${escapeHtml(l.qty ?? "")}</td>
         <td>${quotedDisplay}</td>
         <td><span class="badge ${statusBadgeClass(l.leadStatus)}">${escapeHtml(l.leadStatus||"New")}</span></td>
+        <td>${clockBadgeHTML(l)}</td>
         <td>${escapeHtml(l.followUpDate||"—")}</td>
         <td>${orderDisplay}</td>
         <td style="white-space:nowrap;">
