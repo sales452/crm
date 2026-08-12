@@ -435,6 +435,16 @@ function renderLeadsTable(){
   // sort means everything else keeps its existing (date) order.
   rows = rows.slice().sort((a, b) => (a.leadStatus === "Won" ? 1 : 0) - (b.leadStatus === "Won" ? 1 : 0));
 
+  // Quick-glance Won/Pending/Lost counts for whatever's currently filtered
+  // in (agent, status, month, search) -- updates the moment any filter
+  // changes, e.g. picking an agent from the Sales Person dropdown.
+  const wonCount = rows.filter(l => l.leadStatus === "Won").length;
+  const lostCount = rows.filter(l => l.leadStatus === "Lost").length;
+  const pendingCount = rows.filter(l => OPEN_STATUSES.includes(l.leadStatus)).length;
+  $("chipWon").textContent = `✓ ${wonCount}`;
+  $("chipPending").textContent = `● ${pendingCount}`;
+  $("chipLost").textContent = `✕ ${lostCount}`;
+
   $("leadsEmpty").classList.toggle("hidden", rows.length > 0);
 
   $("leadsBody").innerHTML = rows.map(l => {
@@ -1290,12 +1300,22 @@ function populateLeaderboardMonths(){
 
 function renderLeaderboard(){
   const month = $("leaderboardMonth").value || monthKey(todayISO());
+
+  // All-time total per person, summed across every month's points doc --
+  // shown alongside the monthly figure so "how many points does X have
+  // overall" doesn't require flipping through every month one by one.
+  const allTimeByName = {};
+  pointsCache.forEach(p => {
+    if(!p.name) return;
+    allTimeByName[p.name] = (allTimeByName[p.name] || 0) + (p.points || 0);
+  });
+
   const rows = pointsCache
     .filter(p => p.month === month && (p.points || 0) !== 0)
     .sort((a,b) => (b.points||0) - (a.points||0));
 
   if(!rows.length){
-    $("leaderboardBody").innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--ink-soft);">No points yet for ${escapeHtml(month)} — mark a query Won to get on the board.</td></tr>`;
+    $("leaderboardBody").innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--ink-soft);">No points yet for ${escapeHtml(month)} — mark a query Won to get on the board.</td></tr>`;
     return;
   }
   $("leaderboardBody").innerHTML = rows.map((p, i) => `
@@ -1303,6 +1323,7 @@ function renderLeaderboard(){
       <td>${i + 1}</td>
       <td>${escapeHtml(p.name || "")}</td>
       <td><strong>${p.points || 0}</strong></td>
+      <td>${allTimeByName[p.name] || 0}</td>
     </tr>
   `).join("");
 }

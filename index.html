@@ -166,6 +166,20 @@
   .clock-badge.urgent{ color:#FFD1C7; }
   @keyframes clockBlink{ 50%{ opacity:0.15; } }
 
+  .stat-chips{ display:flex; gap:0.5rem; align-items:center; }
+  .stat-chip{
+    display:inline-flex; align-items:center; gap:0.3rem;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:0.8rem; font-weight:600;
+    padding:0.4rem 0.65rem;
+    border-radius:6px;
+    border:1px solid transparent;
+    white-space:nowrap;
+  }
+  .stat-chip.won{ background:var(--forest-bg); color:var(--forest); border-color:var(--forest); }
+  .stat-chip.pending{ background:var(--mustard-bg); color:var(--mustard); border-color:var(--mustard); }
+  .stat-chip.lost{ background:var(--rust-bg); color:var(--rust); border-color:var(--rust); }
+
   .badge{
     display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:0.65rem;
     text-transform:uppercase; letter-spacing:0.4px; padding:0.15rem 0.5rem; border-radius:4px;
@@ -292,6 +306,11 @@
           </select>
           <select id="filterSalesPerson" class="hidden"></select>
           <select id="filterMonth"></select>
+          <div class="stat-chips" id="leadStatChips">
+            <span class="stat-chip won" id="chipWon" title="Won in current view">✓ 0</span>
+            <span class="stat-chip pending" id="chipPending" title="Still open in current view">● 0</span>
+            <span class="stat-chip lost" id="chipLost" title="Lost in current view">✕ 0</span>
+          </div>
           <div class="spacer"></div>
           <button class="btn secondary" id="bulkImportBtn">Bulk Import Part Numbers</button>
           <button class="btn" id="newLeadBtn">+ New Lead</button>
@@ -360,7 +379,7 @@
         </div>
         <div class="hint-bar" id="leaderboardHint">Points are earned when a query is marked Won. Lost/lapsed queries are neutral — no points lost.</div>
         <table>
-          <thead><tr><th>#</th><th>Sales Person</th><th>Points This Month</th></tr></thead>
+          <thead><tr><th>#</th><th>Sales Person</th><th>Points This Month</th><th>All-Time Points</th></tr></thead>
           <tbody id="leaderboardBody"></tbody>
         </table>
       </div>
