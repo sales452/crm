@@ -245,6 +245,7 @@
     <button class="tab-btn active" data-tab="leads">Leads</button>
     <button class="tab-btn" data-tab="tasks">Daily Tasks</button>
     <button class="tab-btn" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="analytics">Analytics</button>
     <button class="tab-btn hidden" data-tab="users" id="usersTabBtn">Users</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
   </nav>
@@ -323,10 +324,66 @@
           <div class="stat-card"><div class="num" id="statOrderValue">₹0</div><div class="label">Won Order Value (INR)</div></div>
         </div>
       </div>
+      <div class="panel">
+        <div class="toolbar" style="justify-content:space-between;">
+          <h2 style="margin:0;">Leaderboard — Points</h2>
+          <select id="leaderboardMonth"></select>
+        </div>
+        <div class="hint-bar" id="leaderboardHint">Points are earned when a query is marked Won. Lost/lapsed queries are neutral — no points lost.</div>
+        <table>
+          <thead><tr><th>#</th><th>Sales Person</th><th>Points This Month</th></tr></thead>
+          <tbody id="leaderboardBody"></tbody>
+        </table>
+      </div>
     </section>
 
-    <!-- ===== USERS TAB (master only) ===== -->
-    <section id="tab-users" class="tab-section hidden">
+    <!-- ===== ANALYTICS TAB ===== -->
+    <section id="tab-analytics" class="tab-section hidden">
+      <div class="panel">
+        <div class="toolbar" style="justify-content:space-between;">
+          <div class="hint-bar" style="margin:0;">Based on Won orders (revenue) unless noted. Values converted to INR.</div>
+          <select id="analyticsMonth"></select>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Top 10 Countries — Revenue &amp; Inquiry Volume</h2>
+        <div class="hint-bar">Ranked by Won order value — highest-value markets to prioritize for marketing spend.</div>
+        <table>
+          <thead><tr><th>#</th><th>Country</th><th>Won Orders</th><th>Revenue (INR)</th><th>Total Inquiries</th></tr></thead>
+          <tbody id="topCountriesBody"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>Product-wise Sales</h2>
+        <div class="hint-bar">Which part numbers sell the most, by units and by revenue.</div>
+        <table>
+          <thead><tr><th>#</th><th>Part No.</th><th>Won Orders</th><th>Qty Sold</th><th>Revenue (INR)</th></tr></thead>
+          <tbody id="productSalesBody"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>Country-wise Sales — All Countries</h2>
+        <table>
+          <thead><tr><th>#</th><th>Country</th><th>Won Orders</th><th>Revenue (INR)</th></tr></thead>
+          <tbody id="countrySalesBody"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>Country + Product — What Sells Where</h2>
+        <div class="hint-bar">Pick a country to see its best-selling products.</div>
+        <div class="toolbar">
+          <select id="countryProductFilter"></select>
+        </div>
+        <table>
+          <thead><tr><th>#</th><th>Part No.</th><th>Won Orders</th><th>Qty Sold</th><th>Revenue (INR)</th></tr></thead>
+          <tbody id="countryProductBody"></tbody>
+        </table>
+      </div>
+    </section>
       <div class="panel">
         <h2>Team</h2>
         <table>
@@ -382,7 +439,9 @@
     <h2 id="leadModalTitle">New Lead</h2>
     <div class="grid2">
       <div class="field"><label>Inquiry Date</label><input type="date" id="f-date"></div>
-      <div class="field"><label>Client Name</label><input type="text" id="f-client"></div>
+      <div class="field"><label>Client Name</label><input type="text" id="f-client">
+        <div class="hint-bar" id="clientHistoryHint" style="margin:0.3rem 0 0;"></div>
+      </div>
       <div class="field"><label>Client Type</label>
         <select id="f-clientType"><option>Domestic</option><option>International</option></select>
       </div>
@@ -401,7 +460,9 @@
         </select>
       </div>
       <div class="field"><label>Product Category</label><input type="text" id="f-category"></div>
-      <div class="field"><label>Product / Part No.</label><input type="text" id="f-partNo"></div>
+      <div class="field"><label>Product / Part No.</label><input type="text" id="f-partNo">
+        <div class="hint-bar" id="lastPriceHint" style="margin:0.3rem 0 0;"></div>
+      </div>
       <div class="field"><label>Inquiry Qty</label><input type="number" id="f-qty" min="0"></div>
       <div class="field"><label>Quoted Value</label><input type="number" step="0.01" id="f-quotedValue"></div>
       <div class="field"><label>Currency</label>

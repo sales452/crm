@@ -31,6 +31,8 @@ let usersUnsub = null;
 let usersCache = [];
 let tasksUnsub = null;
 let tasks = [];
+let pointsUnsub = null;
+let pointsCache = [];        // [{ id, name, month, points }] -- one doc per person per month
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -60,6 +62,41 @@ const FOLLOWUP_CYCLE_DAYS = 3;   // prompt again every 3 days while a query is o
 const LEAD_EXPIRY_DAYS = 15;     // no resolution by day 15 -> auto-marked dead
 const OPEN_STATUSES = ["New","Contacted","Quoted","Follow-up","Negotiation"];
 let reorderCycleDays = 12;       // default; overridden by Settings > Re-order reminder
+const WON_POINTS = 10;           // points awarded to salesPerson when a query is marked Won
+
+// ---------------------------------------------------------------------------
+// Loud alert bell — used when a task is assigned to the person currently
+// logged in. Built with Web Audio API (no sound file needed). Browsers only
+// allow audio after a user gesture, so the context is created/resumed on
+// the login click, which happens before any bell could ever need to fire.
+// ---------------------------------------------------------------------------
+let audioCtx = null;
+function getAudioCtx(){
+  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if(audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+function ringBell(times = 3){
+  try{
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime;
+    for(let i = 0; i < times; i++){
+      const t0 = now + i * 0.55;
+      [988, 1319].forEach((freq) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, t0);
+        gain.gain.linearRampToValueAtTime(0.6, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.45);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.46);
+      });
+    }
+  }catch(err){ console.error("Bell failed to play:", err); }
+}
 function monthKey(dateStr){
   if(!dateStr) return "";
   const d = new Date(dateStr);
@@ -117,6 +154,7 @@ function autoCurrencyFromCountry(countryInputId, currencySelectId){
 // Auth
 // ---------------------------------------------------------------------------
 $("loginBtn").onclick = async () => {
+  getAudioCtx(); // user gesture -- unlocks audio for the task-assignment bell for this session
   const email = $("loginEmail").value.trim();
   const password = $("loginPassword").value;
   $("loginError").textContent = "";
@@ -141,6 +179,7 @@ onAuthStateChanged(auth, async (user) => {
     if(leadsUnsub) leadsUnsub();
     if(usersUnsub) usersUnsub();
     if(tasksUnsub) tasksUnsub();
+    if(pointsUnsub) pointsUnsub();
     $("loginScreen").classList.remove("hidden");
     $("appScreen").classList.add("hidden");
     return;
@@ -169,6 +208,7 @@ onAuthStateChanged(auth, async (user) => {
   attachLeadsListener();
   attachTasksListener();
   attachUsersListener();
+  attachPointsListener();
   loadExchangeRates();
 });
 
@@ -183,6 +223,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     $("tab-" + btn.dataset.tab).classList.remove("hidden");
     if(btn.dataset.tab === "tasks"){ renderDailyTasks(); renderManualTasks(); }
     if(btn.dataset.tab === "dashboard") renderDashboard();
+    if(btn.dataset.tab === "analytics") renderAnalytics();
   };
 });
 
@@ -227,9 +268,11 @@ function attachLeadsListener(){
   leadsUnsub = onSnapshot(q, snap => {
     leads = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     populateMonthFilters();
+    populateAnalyticsMonths();
     renderLeadsTable();
     renderDailyTasks();
     renderDashboard();
+    if(!$("tab-analytics").classList.contains("hidden")) renderAnalytics();
     autoExpireStaleLeads();
     refreshTasksTabBadge();
     if(firstLeadsLoad){
@@ -385,11 +428,28 @@ function renderLeadsTable(){
 
 // Shared status-change logic -- used by both the F2/F4 keyboard shortcuts
 // and the click buttons in the table/modal, so they always stay in sync.
+// Points doc id is "<name>_<Mon YYYY>", e.g. "Shivangi_Aug 2026" -- one
+// running-total doc per person per calendar month, incremented/decremented
+// with Firestore's atomic increment() so simultaneous wins never race.
+function pointsDocId(name, month){
+  return `${name}_${month}`;
+}
+async function awardPoints(name, month, delta){
+  if(!name || !month || !delta) return;
+  try{
+    await setDoc(doc(db, "points", pointsDocId(name, month)), {
+      name, month, points: increment(delta), updatedAt: serverTimestamp()
+    }, { merge: true });
+  }catch(err){ console.error("Points update failed:", err); }
+}
+
 async function markLeadWon(leadId){
   const lead = leads.find(l => l.id === leadId);
   if(!lead) return;
+  const awardMonth = monthKey(todayISO());
   const update = {
     leadStatus: "Won", orderStatus: "Confirmed", leadConsumption: "Converted",
+    pointsAwarded: WON_POINTS, pointsAwardedMonth: awardMonth,
     updatedAt: serverTimestamp()
   };
   if(!lead.reorderReminderDate){
@@ -398,13 +458,16 @@ async function markLeadWon(leadId){
   }
   try{
     await updateDoc(doc(db, "leads", leadId), update);
-    toast(`${lead.clientName || "Lead"} marked Won & Order Confirmed`);
+    if(lead.salesPerson) await awardPoints(lead.salesPerson, awardMonth, WON_POINTS);
+    toast(`${lead.clientName || "Lead"} marked Won & Order Confirmed — +${WON_POINTS} points to ${lead.salesPerson || "sales person"}`);
   }catch(err){
     console.error(err);
     toast("Couldn't update that lead — try again.");
   }
 }
 
+// Marking a query Lost is deliberately neutral -- no points added or
+// removed, it just stops the query from being chased further.
 async function markLeadLost(leadId){
   const lead = leads.find(l => l.id === leadId);
   if(!lead) return;
@@ -421,16 +484,23 @@ async function markLeadLost(leadId){
 
 // Undoes a Won or Lost marking, back to a neutral open state -- picks the
 // follow-up cadence back up with a fresh 3-day cycle, since the query is
-// active again.
+// active again. If it had been Won, the points it earned are reversed from
+// whichever month they were credited to, so the leaderboard stays accurate.
 async function reopenLead(leadId){
   const lead = leads.find(l => l.id === leadId);
   if(!lead) return;
   try{
-    await updateDoc(doc(db, "leads", leadId), {
+    const update = {
       leadStatus: "New", orderStatus: "Pending", leadConsumption: "Active",
       followUpDate: addDays(todayISO(), FOLLOWUP_CYCLE_DAYS),
       updatedAt: serverTimestamp()
-    });
+    };
+    if(lead.leadStatus === "Won" && lead.pointsAwarded && lead.pointsAwardedMonth && lead.salesPerson){
+      await awardPoints(lead.salesPerson, lead.pointsAwardedMonth, -lead.pointsAwarded);
+      update.pointsAwarded = 0;
+      update.pointsAwardedMonth = null;
+    }
+    await updateDoc(doc(db, "leads", leadId), update);
     toast(`${lead.clientName || "Lead"} reopened as an active query.`);
   }catch(err){
     console.error(err);
@@ -503,6 +573,11 @@ function openLeadModal(id){
   renderTransferLog(lead);
   renderFollowUpLog(lead);
   $("f-followUpNote").value = "";
+  // Auto-fill hints only make sense while creating a brand-new lead --
+  // clear them on open either way so a stale suggestion from the last
+  // modal session never lingers.
+  $("clientHistoryHint").innerHTML = "";
+  $("lastPriceHint").innerHTML = "";
 
   const isWon = lead && lead.leadStatus === "Won";
   const isClosed = lead && (lead.leadStatus === "Won" || lead.leadStatus === "Lost");
@@ -691,6 +766,65 @@ $("addReorderNoteBtn").onclick = async () => {
 };
 
 // ---------------------------------------------------------------------------
+// Auto-fill from history -- while creating a brand-new lead (not editing),
+// typing a Client Name pulls that client's last-used country/state/city/type
+// from their most recent previous lead, and typing a Part No. surfaces the
+// last price it was quoted at (their own, if they're a repeat client; the
+// most recent anyone quoted it at, otherwise) so quoting doesn't mean
+// digging back through old rows by hand.
+// ---------------------------------------------------------------------------
+function normText(s){ return String(s||"").trim().toLowerCase(); }
+
+function findLatestLeadFor({ client, partNo }){
+  let candidates = leads.filter(l => l.id !== editingLeadId);
+  if(client) candidates = candidates.filter(l => normText(l.clientName) === normText(client));
+  if(partNo) candidates = candidates.filter(l => normText(l.partNo) === normText(partNo));
+  if(!candidates.length) return null;
+  return candidates.slice().sort((a,b) => (b.inquiryDate||"").localeCompare(a.inquiryDate||""))[0];
+}
+
+$("f-client").addEventListener("blur", () => {
+  if(editingLeadId) return; // history auto-fill only applies to a fresh lead
+  const client = $("f-client").value.trim();
+  if(!client){ $("clientHistoryHint").innerHTML = ""; return; }
+  const match = findLatestLeadFor({ client });
+  if(!match){ $("clientHistoryHint").innerHTML = ""; return; }
+
+  const filled = [];
+  if(!$("f-country").value.trim() && match.country){ $("f-country").value = match.country; filled.push("country"); }
+  if(!$("f-state").value.trim() && match.state){ $("f-state").value = match.state; filled.push("state"); }
+  if(!$("f-city").value.trim() && match.city){ $("f-city").value = match.city; filled.push("city"); }
+  if($("f-clientType").value === "Domestic" && match.clientType === "International"){
+    $("f-clientType").value = match.clientType; filled.push("client type");
+  }
+  $("clientHistoryHint").innerHTML = `📋 Existing client — last inquiry ${escapeHtml(match.inquiryDate||"")} for ${escapeHtml(match.partNo||"—")}.`
+    + (filled.length ? ` Auto-filled ${filled.join(", ")} from their last record.` : "");
+});
+
+$("f-partNo").addEventListener("blur", () => {
+  if(editingLeadId) return;
+  const partNo = $("f-partNo").value.trim();
+  if(!partNo){ $("lastPriceHint").innerHTML = ""; return; }
+  const client = $("f-client").value.trim();
+  // Prefer this exact client's own last price for this part; if they've
+  // never bought it before, fall back to the most recent price quoted to
+  // anyone for that part, as a starting reference point.
+  const sameClientMatch = client ? findLatestLeadFor({ client, partNo }) : null;
+  const match = sameClientMatch || findLatestLeadFor({ partNo });
+  if(!match || !match.quotedValue){ $("lastPriceHint").innerHTML = ""; return; }
+
+  const label = sameClientMatch ? "to this client" : `to ${escapeHtml(match.clientName||"another client")}`;
+  $("lastPriceHint").innerHTML = `💰 Last quoted ${escapeHtml(match.quotedCurrency||"INR")} ${Number(match.quotedValue).toLocaleString()} ${label} on ${escapeHtml(match.inquiryDate||"")}. `
+    + `<button type="button" class="icon-btn" id="useLastPriceBtn">Use this price</button>`;
+  $("useLastPriceBtn").onclick = () => {
+    $("f-quotedValue").value = match.quotedValue;
+    $("f-currency").value = match.quotedCurrency || "INR";
+    if(!$("f-category").value.trim() && match.productCategory) $("f-category").value = match.productCategory;
+    toast("Price filled from the last quote — review before saving.");
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Bulk import: shared inquiry details + a pasted list of part numbers
 // ---------------------------------------------------------------------------
 $("bulkImportBtn").onclick = () => {
@@ -835,8 +969,11 @@ function renderDailyTasks(){
 // ---------------------------------------------------------------------------
 // Manual tasks -- standalone reminders not tied to any lead
 // ---------------------------------------------------------------------------
+let firstTasksLoad = true;
+
 function attachTasksListener(){
   if(tasksUnsub) tasksUnsub();
+  firstTasksLoad = true;
   // Same reasoning as the leads query: sales reps' security rule only lets
   // them read tasks assigned to themselves, so the query itself needs that
   // constraint or Firestore rejects the whole "list" outright.
@@ -844,9 +981,24 @@ function attachTasksListener(){
     ? query(collection(db, "tasks"), where("assignedTo", "==", currentName), orderBy("dueDate", "asc"))
     : query(collection(db, "tasks"), orderBy("dueDate", "asc"));
   tasksUnsub = onSnapshot(q, snap => {
+    // Ring the bell for tasks newly assigned to whoever is logged in right
+    // now, on THIS device -- skipped on the very first load (that's just
+    // existing tasks syncing in, not a new assignment) and skipped for
+    // tasks assigned to someone else.
+    if(!firstTasksLoad){
+      snap.docChanges().forEach(change => {
+        if(change.type !== "added") return;
+        const t = { id: change.doc.id, ...change.doc.data() };
+        if(t.assignedTo === currentName){
+          ringBell();
+          toast(`🔔 New task assigned to you: "${t.title || "Untitled"}"`);
+        }
+      });
+    }
     tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderManualTasks();
     refreshTasksTabBadge();
+    firstTasksLoad = false;
   }, err => {
     console.error(err);
     toast("Couldn't load tasks — check your connection.");
@@ -991,6 +1143,137 @@ $("taskSaveBtn").onclick = async () => {
     $("taskError").textContent = "Couldn't save that task — try again.";
   }
 };
+
+// ---------------------------------------------------------------------------
+// Points / leaderboard (everyone can read; readable across all roles so
+// the whole team can see the standings, not just master/manager)
+// ---------------------------------------------------------------------------
+function attachPointsListener(){
+  if(pointsUnsub) pointsUnsub();
+  pointsUnsub = onSnapshot(collection(db, "points"), snap => {
+    pointsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    populateLeaderboardMonths();
+    renderLeaderboard();
+  }, err => {
+    console.error(err);
+    toast("Couldn't load the leaderboard — check your connection.");
+  });
+}
+
+function populateLeaderboardMonths(){
+  const nowMonth = monthKey(todayISO());
+  const months = [...new Set([nowMonth, ...pointsCache.map(p => p.month).filter(Boolean)])];
+  months.sort((a,b) => new Date("1 " + b) - new Date("1 " + a));
+  const current = $("leaderboardMonth").value;
+  $("leaderboardMonth").innerHTML = months.map(m => `<option>${m}</option>`).join("");
+  $("leaderboardMonth").value = months.includes(current) ? current : nowMonth;
+}
+
+function renderLeaderboard(){
+  const month = $("leaderboardMonth").value || monthKey(todayISO());
+  const rows = pointsCache
+    .filter(p => p.month === month && (p.points || 0) !== 0)
+    .sort((a,b) => (b.points||0) - (a.points||0));
+
+  if(!rows.length){
+    $("leaderboardBody").innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--ink-soft);">No points yet for ${escapeHtml(month)} — mark a query Won to get on the board.</td></tr>`;
+    return;
+  }
+  $("leaderboardBody").innerHTML = rows.map((p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(p.name || "")}</td>
+      <td><strong>${p.points || 0}</strong></td>
+    </tr>
+  `).join("");
+}
+$("leaderboardMonth").addEventListener("change", renderLeaderboard);
+
+// ---------------------------------------------------------------------------
+// Analytics tab -- country/product breakdowns computed from leads already
+// loaded client-side. Revenue = Won orders' orderValueINR. Respects the
+// same visibility rule as everything else (sales reps see only their own).
+// ---------------------------------------------------------------------------
+function populateAnalyticsMonths(){
+  const months = [...new Set(leads.map(l => monthKey(l.inquiryDate)).filter(Boolean))];
+  months.sort((a,b) => new Date("1 " + b) - new Date("1 " + a));
+  const current = $("analyticsMonth").value;
+  $("analyticsMonth").innerHTML = `<option value="">All Time</option>` + months.map(m => `<option>${m}</option>`).join("");
+  $("analyticsMonth").value = months.includes(current) ? current : "";
+}
+$("analyticsMonth").addEventListener("change", renderAnalytics);
+$("countryProductFilter").addEventListener("change", renderCountryProductTable);
+
+function analyticsRows(){
+  const month = $("analyticsMonth").value;
+  return visibleLeads().filter(l => !month || monthKey(l.inquiryDate) === month);
+}
+
+function renderAnalytics(){
+  const rows = analyticsRows();
+  const won = rows.filter(l => l.leadStatus === "Won");
+
+  // --- country-wise: inquiry volume (all rows) + revenue (won only) ---
+  const byCountry = {};
+  const touchCountry = (c) => {
+    const key = (c && c.trim()) || "Unknown";
+    if(!byCountry[key]) byCountry[key] = { country: key, wonOrders: 0, revenue: 0, inquiries: 0 };
+    return byCountry[key];
+  };
+  rows.forEach(l => { touchCountry(l.country).inquiries++; });
+  won.forEach(l => {
+    const c = touchCountry(l.country);
+    c.wonOrders++;
+    c.revenue += Number(l.orderValueINR) || 0;
+  });
+  const countryList = Object.values(byCountry).sort((a,b) => b.revenue - a.revenue);
+
+  $("topCountriesBody").innerHTML = countryList.slice(0, 10).map((c,i) => `
+    <tr><td>${i+1}</td><td>${escapeHtml(c.country)}</td><td>${c.wonOrders}</td><td>₹${c.revenue.toLocaleString()}</td><td>${c.inquiries}</td></tr>
+  `).join("") || `<tr><td colspan="5" style="text-align:center;color:var(--ink-soft);">No data yet.</td></tr>`;
+
+  $("countrySalesBody").innerHTML = countryList.map((c,i) => `
+    <tr><td>${i+1}</td><td>${escapeHtml(c.country)}</td><td>${c.wonOrders}</td><td>₹${c.revenue.toLocaleString()}</td></tr>
+  `).join("") || `<tr><td colspan="4" style="text-align:center;color:var(--ink-soft);">No data yet.</td></tr>`;
+
+  // --- product-wise (won orders only -- this is "sales", not inquiries) ---
+  const byProduct = {};
+  won.forEach(l => {
+    const key = (l.partNo && l.partNo.trim()) || "Unknown";
+    if(!byProduct[key]) byProduct[key] = { partNo: key, wonOrders: 0, qty: 0, revenue: 0 };
+    byProduct[key].wonOrders++;
+    byProduct[key].qty += Number(l.qty) || 0;
+    byProduct[key].revenue += Number(l.orderValueINR) || 0;
+  });
+  const productList = Object.values(byProduct).sort((a,b) => b.revenue - a.revenue);
+  $("productSalesBody").innerHTML = productList.map((p,i) => `
+    <tr><td>${i+1}</td><td>${escapeHtml(p.partNo)}</td><td>${p.wonOrders}</td><td>${p.qty}</td><td>₹${p.revenue.toLocaleString()}</td></tr>
+  `).join("") || `<tr><td colspan="5" style="text-align:center;color:var(--ink-soft);">No won orders yet.</td></tr>`;
+
+  // --- country + product filter dropdown, kept in sync with available countries ---
+  const countries = countryList.map(c => c.country).sort();
+  const currentCountry = $("countryProductFilter").value;
+  $("countryProductFilter").innerHTML = countries.map(c => `<option>${escapeHtml(c)}</option>`).join("");
+  if(countries.includes(currentCountry)) $("countryProductFilter").value = currentCountry;
+  renderCountryProductTable();
+}
+
+function renderCountryProductTable(){
+  const country = $("countryProductFilter").value;
+  const rows = analyticsRows().filter(l => l.leadStatus === "Won" && ((l.country && l.country.trim()) || "Unknown") === country);
+  const byProduct = {};
+  rows.forEach(l => {
+    const key = (l.partNo && l.partNo.trim()) || "Unknown";
+    if(!byProduct[key]) byProduct[key] = { partNo: key, wonOrders: 0, qty: 0, revenue: 0 };
+    byProduct[key].wonOrders++;
+    byProduct[key].qty += Number(l.qty) || 0;
+    byProduct[key].revenue += Number(l.orderValueINR) || 0;
+  });
+  const list = Object.values(byProduct).sort((a,b) => b.revenue - a.revenue);
+  $("countryProductBody").innerHTML = list.length ? list.map((p,i) => `
+    <tr><td>${i+1}</td><td>${escapeHtml(p.partNo)}</td><td>${p.wonOrders}</td><td>${p.qty}</td><td>₹${p.revenue.toLocaleString()}</td></tr>
+  `).join("") : `<tr><td colspan="5" style="text-align:center;color:var(--ink-soft);">No won orders for ${escapeHtml(country||"this country")} yet.</td></tr>`;
+}
 
 // ---------------------------------------------------------------------------
 // Dashboard tab

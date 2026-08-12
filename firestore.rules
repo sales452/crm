@@ -66,5 +66,15 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isMasterOrManager();
     }
+
+    // ---- points (monthly leaderboard, doc id = "<name>_<Mon YYYY>") ----
+    // Anyone signed in can read the leaderboard. Writes happen automatically
+    // from markLeadWon/reopenLead (any signed-in user can win/reopen a lead
+    // they're allowed to touch), so this mirrors the leads write rule rather
+    // than being locked to master/manager.
+    match /points/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
   }
 }
